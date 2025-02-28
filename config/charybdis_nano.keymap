@@ -72,6 +72,29 @@
         };
     };
 
+    macros {
+        L_CLK: L_CLK {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&mkp LCLK>;
+            label = "L_CLK";
+        };
+
+        M_CLK: M_CLK {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&none>;
+            label = "M_CLK";
+        };
+
+        R_CLK: R_CLK {
+            compatible = "zmk,behavior-macro";
+            #binding-cells = <0>;
+            bindings = <&none>;
+            label = "R_CLK";
+        };
+    };
+
     keymap {
         compatible = "zmk,keymap";
 
