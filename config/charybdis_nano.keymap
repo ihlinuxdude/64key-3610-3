@@ -27,16 +27,7 @@
         };
     };
 
-    macros {
-        macro_phone: macro_phone {
-            // 1351
 
-            label = "MACRO_PHONE";
-            compatible = "zmk,behavior-macro";
-            #binding-cells = <0>;
-            bindings = <&kp N1 &kp N3 &kp N5 &kp N1>;
-        };
-    };
 
     combos {
         compatible = "zmk,combos";
