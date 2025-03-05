@@ -93,9 +93,9 @@
             label = "DEFAULT";
             bindings = <
 &lt 1 ESC  &kp N1  &kp N2     &kp N3    &kp N4     &kp N5        &kp N6  &kp N7   &kp N8             &kp N9    &kp N0    &lt 1 MINUS
-&lt 2 TAB  &kp Q   &kp W      &kp E     &kp R      &kp T         &kp Y   &kp U    &kp I              &kp O     &kp P     &lt 2 EQUAL
-&kp LSHFT  &kp A   &kp S      &kp D     &kp F      &kp G         &kp H   &kp J    &kp K              &kp L     &kp SEMI  &lt 3 SQT
-&kp CAPS   &kp Z   &kp X      &kp C     &kp V      &kp B         &kp N   &kp M    &kp COMMA          &kp DOT   &kp FSLH  &kp BSLH
+&lt 2 TAB  &kp Q   &kp W      &kp E     &kp R      &kp T         &mkp LCLK   &kp U    &kp I              &kp O     &kp P     &lt 2 EQUAL
+&kp LSHFT  &kp A   &kp S      &kp D     &kp F      &kp G         &mkp MCLK   &kp J    &kp K              &kp L     &kp SEMI  &lt 3 SQT
+&kp CAPS   &kp Z   &kp X      &kp C     &kp V      &kp B       &mkp RCLK   &kp M    &kp COMMA          &kp DOT   &kp FSLH  &kp BSLH
                    &kp GRAVE  &kp LGUI  &kp BSPC   &kp SPACE     &none   &kp RET  &kp LBKT           &kp RBKT
                    &kp LALT   &kp LALT  &kp LCTRL  &lt 3 DELETE  &none   &none    &lt 2 KP_NUMBER_2  &kp LALT
             >;
