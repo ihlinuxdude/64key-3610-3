@@ -74,14 +74,14 @@
         M_CLK: M_CLK {
             compatible = "zmk,behavior-macro";
             #binding-cells = <0>;
-            bindings = <&none>;
+            bindings = <&mkp MCLK>;
             label = "M_CLK";
         };
 
         R_CLK: R_CLK {
             compatible = "zmk,behavior-macro";
             #binding-cells = <0>;
-            bindings = <&none>;
+            bindings = <&mkp RCLK>;
             label = "R_CLK";
         };
     };
