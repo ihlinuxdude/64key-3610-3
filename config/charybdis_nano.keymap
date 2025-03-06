@@ -64,35 +64,7 @@
     };
 
     macros {
-        L_CLK: L_CLK {
-        compatible = "zmk,behavior-hold-tap";
-        #binding-cells = <0>;
-        bindings = <&mo>, <&mkp LCLK>;
-        tapping-term-ms = <200>;    // 定义触发时间
-        quick-tap-ms = <150>;       // 快速单击判定时间
-        flavor = "tap-preferred";   // 优先单击
-        label = "L_CLK";
-    };
 
-        M_CLK: M_CLK {
-             compatible = "zmk,behavior-hold-tap";
-        #binding-cells = <0>;
-            bindings = <&mo>, <&mkp MCLK>;
-    tapping-term-ms = <200>;    // 定义触发时间
-        quick-tap-ms = <150>;       // 快速单击判定时间
-        flavor = "tap-preferred";   // 优先单击
-            label = "M_CLK";
-        };
-
-        R_CLK: R_CLK {
-            compatible = "zmk,behavior-hold-tap";
-        #binding-cells = <0>;
-            bindings = <&mo>, <&mkp RCLK>;
-    tapping-term-ms = <200>;    // 定义触发时间
-        quick-tap-ms = <150>;       // 快速单击判定时间
-        flavor = "tap-preferred";   // 优先单击
-            label = "R_CLK";
-        };
     };
 
     keymap {
