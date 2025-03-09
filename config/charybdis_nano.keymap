@@ -22,11 +22,29 @@
 
         td0: tap_dance_0 {
             compatible = "zmk,behavior-tap-dance";
-            label = "TAP_DANCE_0";
+            label = "L_CLK";
             #binding-cells = <0>;
             tapping-term-ms = <200>;
             bindings = <&mkp LCLK>, <&mkp LCLK>;
         };
+        td1: tap_dance_1 {
+            compatible = "zmk,behavior-tap-dance";
+            label = "M_CLK";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&mkp MCLK>, <&mkp MCLK>;
+        };
+        td2: tap_dance_2 {
+            compatible = "zmk,behavior-tap-dance";
+            label = "R_CLK";
+            #binding-cells = <0>;
+            tapping-term-ms = <200>;
+            bindings = <&mkp RCLK>, <&mkp RCLK>;
+        };
+
+
+
+
     };
 
 
