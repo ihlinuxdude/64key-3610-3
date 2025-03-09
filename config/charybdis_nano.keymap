@@ -19,15 +19,15 @@
 / {
     behaviors {
      // 新增长按敏感的鼠标行为
-+       lclk_hold: left_click_hold {
-+           compatible = "zmk,behavior-hold-tap";
-+           label = "LCLK_HOLD";
-+           #binding-cells = <2>;
-+           tapping-term-ms = <200>;      // 长按判定时间
-+           quick-tap-ms = <150>;         // 快速点击判定
-+           flavor = "hold-preferred";     // 优先识别长按
-+           bindings = <&kp>, <&mkp LCLK>; // 短按触发键，长按触发鼠标左键
-+       };
+     lclk_hold: left_click_hold {
+        compatible = "zmk,behavior-hold-tap";
+         label = "LCLK_HOLD";
+        #binding-cells = <2>;
+          tapping-term-ms = <200>;      // 长按判定时间
+          quick-tap-ms = <150>;         // 快速点击判定
+          flavor = "hold-preferred";     // 优先识别长按
+          bindings = <&kp>, <&mkp LCLK>; // 短按触发键，长按触发鼠标左键
+      };
 
         td0: tap_dance_0 {
             compatible = "zmk,behavior-tap-dance";
