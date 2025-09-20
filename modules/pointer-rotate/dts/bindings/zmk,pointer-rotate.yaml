@@ -1,0 +1,7 @@
+title: ZMK Pointer Rotate Processor
+type: zmk,input-processor
+properties:
+  angle-deg:
+    type: int
+    required: true
+    description: Rotation angle in degrees (positive = CCW)
