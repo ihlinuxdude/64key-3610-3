@@ -1,0 +1,83 @@
+Thanks for sharing the latest build log. The build for `nice_nano_v2__charybdis_nano_right__studio-pc-usb-uart__DCONFIG_ZMK_STUDIO=y__DCONFIG_ZM...` failed again with an exit code 1, but this time the error is different from the log level issue. Let’s analyze the problem and get it fixed.
+
+### Analysis of the Build Failure
+The key error in the log is:
+
+```
+warning: the value of the 'DEBUG' is invalid for ZMK_LOG_LEVEL, level 0-4 are valid (found 0, expected 0-4) at /home/runner/work/zmk/zmk/app/subsys/logging/config/logging.conf.template.log (28), which has type int: assignment ignored
+...
+CMake Error at /workdir/zmk/build/zephyr/cmake/modules/zephyr_default.cmake:135 (message):
+  command failed with return code: 1
+...
+/workdir/zmk/build/zephyr/include/generated/autoconf.h:17: error: #error "Unknown ZMK_LOG_LEVEL value"
+...
+FATAL ERROR: command exited with status 1: /opt/local/bin/ninja -C build/nice_nano_v2__charybdis_nano_right__studio-pc-usb-uart__DCONFIG_ZMK_STUDIO=y__DCONFIG_ZM...
+```
+
+#### Key Points:
+- **Warning**: The `DEBUG` value for `ZMK_LOG_LEVEL` is still invalid (expects 0-4), and the assignment is ignored. This suggests the previous fix to set `CONFIG_ZMK_LOG_LEVEL=4` wasn’t applied or was overridden.
+- **Error**: The `#error "Unknown ZMK_LOG_LEVEL value"` in `autoconf.h` indicates the build system couldn’t resolve the log level, likely because `CONFIG_ZMK_LOG_LEVEL` is either unset, misconfigured, or conflicting with a default.
+- **Cause**: The logging configuration issue persists, preventing the build from proceeding. The SPI pin changes (MOSI=P0.06, MISO=P0.07, IRQ=P0.26) might be fine, but the build fails before testing them due to this configuration error.
+
+### Why This Happened
+- **Unapplied Fix**: It seems the change from `CONFIG_ZMK_LOG_LEVEL=DEBUG` to `CONFIG_ZMK_LOG_LEVEL=4` wasn’t committed or pushed correctly, or the file was reverted. The log shows the original `DEBUG` string, which Zephyr/ZMK doesn’t recognize as a valid integer.
+- **Configuration Conflict**: The `prjf/charybdis_nano_right.conf` might not be overriding the default `ZMK_LOG_LEVEL` properly, or another config file is resetting it.
+
+### Suggested Fix
+Let’s ensure the log level is correctly set to a numeric value and verify the configuration.
+
+#### 1. **Correct the Log Level**
+- **Edit `prjf/charybdis_nano_right.conf`**:
+  - Confirm or add:
+    ```
+    CONFIG_ZMK_LOG_LEVEL=4
+    ```
+  - Remove any stray `CONFIG_ZMK_LOG_LEVEL=DEBUG` lines if they exist.
+  - Save and commit the change.
+- **Why This Works**: ZMK/Zephyr requires `CONFIG_ZMK_LOG_LEVEL` to be an integer (0=disabled, 1=error, 2=warning, 3=info, 4=debug). Setting it to 4 enables debug output without triggering the `#error`.
+
+#### 2. **Verify Configuration Precedence**
+- **Check Other Config Files**: Ensure no other `.conf` files (e.g., `boards/nice_nano_v2.conf` or `zmk-config`) override `ZMK_LOG_LEVEL`. Open them and search for `CONFIG_ZMK_LOG_LEVEL`. If found, comment it out or set it to 4 consistently.
+- **Clean Build**: To avoid cached config issues, clean the build directory before retrying:
+  ```
+  cd ../fresh-fork
+  rm -rf build
+  ```
+
+#### 3. **Rebuild and Push**
+- **Commit and Push**:
+  ```
+  git add prjf/charybdis_nano_right.conf
+  git commit -m "Fix build: Set CONFIG_ZMK_LOG_LEVEL=4 to resolve unknown value error
+  - Remove invalid DEBUG string
+  - Ensure consistent logging configuration"
+  git push origin 64key-3610-automouse
+  ```
+- **Monitor Build**: Check GitHub Actions for the new run. The build should succeed if the log level is resolved.
+
+#### 4. **Test and Debug**
+- **Flash**: If the build passes, download the UF2 artifact for the right half, flash it (double-tap reset, drag UF2), and test the trackball.
+- **Serial Logs**: Connect a USB-to-serial adapter (115200 baud) and monitor output for:
+  - `PMW3610: Initialized` (sensor startup).
+  - `PMW3610 deltas: x=X, y=Y` (delta changes with ball movement).
+- **Expected Behavior**: Cursor should move if SPI/IRQ pins are correct. The 90° + invert settings should approximate the 45° cant.
+
+#### 5. **Troubleshoot if Failed Again**
+- **Check Logs**: Expand the job log for detailed errors. Look for:
+  - DTS syntax issues (e.g., invalid `interrupt-gpios`).
+  - Pin conflicts (e.g., P0.26 unavailable).
+- **Revert Logging**: If logging remains problematic, comment out `CONFIG_ZMK_LOG_LEVEL=4` and rebuild to isolate the pin fix.
+- **Pin Validation**: If no movement after success, verify P0.06, P0.07, and P0.26 against your PCB. Adjust to defaults (e.g., P0.16, P0.17, P0.25) if needed.
+
+### Expected Outcome
+- **Build Success**: Setting `CONFIG_ZMK_LOG_LEVEL=4` should eliminate the `#error`, allowing the build to complete.
+- **Trackball Functionality**: Correct SPI pins should enable PMW3610 communication, with orientation settings applying.
+- **Debug Output**: Logs will confirm sensor activity.
+
+### Action Plan
+1. **Update Config**: Ensure `CONFIG_ZMK_LOG_LEVEL=4` is set and check for conflicts.
+2. **Clean and Push**: Remove build cache, commit, and push.
+3. **Rebuild and Test**: Monitor Actions, flash, and check logs/movement.
+4. **Report Back**: Share the log or test results—I’ll refine further.
+
+This should clear the build block—let’s get that trackball moving! 🚀 (It’s 10:55 AM EDT on Sept 20, 2025—great momentum!)
