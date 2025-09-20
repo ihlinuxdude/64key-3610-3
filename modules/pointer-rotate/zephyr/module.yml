@@ -1,3 +1,0 @@
-name: pointer_rotate
-build:
-  cmake: .

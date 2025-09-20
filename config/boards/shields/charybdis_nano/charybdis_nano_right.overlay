@@ -53,15 +53,13 @@
         spi-max-frequency = <2000000>;
         irq-gpios = <&gpio0 6 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
         scroll-layers = <1>;
-         snipe-layers = <2>;
-      // automouse-layer = <3>;
+        snipe-layers = <2>;
+        // automouse-layer = <3>;
+        
+        // Try built-in orientation settings for 45° approximation
+        pixart,swap-axes;        // Swap X/Y (acts like 90° rotation)
+        pixart,invert-x;         // Invert X axis 
+        // pixart,invert-y;      // Try this instead if swap+invert-x doesn't work
     };
 };
 
-/ {
-    trackball_listener {
-        compatible = "zmk,input-listener";
-        device = <&trackball>;
-        processors = <&pointer_rotate0>;
-    };
-};

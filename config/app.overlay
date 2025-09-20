@@ -1,7 +1,0 @@
-// Add rotation processor for trackball
-/ {
-    pointer_rotate0: pointer_rotate_0 {
-        compatible = "zmk,pointer-rotate";
-        angle-deg = <45>;  // Start with 45° - adjust as needed
-    };
-};
