@@ -56,10 +56,6 @@
         snipe-layers = <2>;
         // automouse-layer = <3>;
         
-        // Try built-in orientation settings for 45° approximation
-        pixart,swap-axes;        // Swap X/Y (acts like 90° rotation)
-        pixart,invert-x;         // Invert X axis 
-        // pixart,invert-y;      // Try this instead if swap+invert-x doesn't work
     };
 };
 
