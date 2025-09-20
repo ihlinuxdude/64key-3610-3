@@ -1,0 +1,90 @@
+Thanks for sharing the build status—it’s frustrating to see the latest fix fail after all the progress. The GitHub Actions run for "CRITICAL FIX: Correct SPI pin mapping for PMW3610 trackball #7" failed with an exit code 1, indicating a build error. Since the previous builds succeeded with the CONFIG options (PMW3610_ORIENTATION_90 and INVERT_X), the failure likely stems from the new SPI pin mapping changes (MOSI to P0.06, MISO to P0.07, IRQ to P0.26) or the added debug logging. Let’s diagnose and fix this.
+Analysis of the Failure
+
+Build Status: The matrix build failed specifically for nice_nano_v2__charybdis_nano_right__studio-pc-usb-uart__DCONFIG_ZMK_STUDIO=y__DCONFIG_ZM... (cut off, but likely includes Bluetooth config). Other builds (e.g., nice_nano_v2__charybdis_nano_left) succeeded.
+Exit Code 1: This suggests a compilation or configuration error, possibly a syntax issue in the devicetree, Kconfig, or driver code.
+Likely Cause: The new pin assignments or debug logging might have introduced:
+
+A devicetree syntax error (e.g., invalid GPIO reference).
+A pin conflict or unsupported configuration for the Nice!Nano’s nRF52832.
+An issue with the PMW3610 driver not handling the new IRQ pin correctly.
+
+
+
+The annotations section mentions one error, but the log snippet isn’t visible—let’s assume it’s related to the SPI/IRQ changes until we see the full output.
+Suggested Approach to Fix
+We need to validate the pin changes and ensure compatibility with the hardware and driver. Here’s a step-by-step plan:
+1. Review the Devicetree Changes
+
+Check the Overlay: Open boards/shields/charybdis_nano_right.overlay and verify the updated SPI node. It should look like:
+text&spi2 {
+    status = "okay";
+    pmw3610@0 {
+        compatible = "pixart,pmw3610";
+        reg = <0>;
+        spi-max-frequency = <2000000>;
+        sck-gpios = <&pro_micro 8 GPIO_ACTIVE_HIGH>;  // Example; adjust to your SCK pin
+        mosi-gpios = <&pro_micro 6 GPIO_ACTIVE_HIGH>;  // P0.06
+        miso-gpios = <&pro_micro 7 GPIO_ACTIVE_HIGH>;  // P0.07
+        interrupt-gpios = <&pro_micro 26 GPIO_ACTIVE_LOW>;  // P0.26
+    };
+};
+
+Issues to Check:
+
+Ensure &pro_micro is the correct label (some Charybdis configs use &nrf_gpio). If it’s &nrf_gpio, use raw pin numbers (e.g., <&nrf_gpio 6 GPIO_ACTIVE_HIGH>).
+Confirm P0.06, P0.07, and P0.26 are available on your Nice!Nano PCB. The nRF52832 has 32 GPIO pins (P0.00-P0.31), but some are reserved (e.g., P0.00/P0.01 for UART). Check your schematic—P0.26 might be used elsewhere.
+Verify spi-max-frequency and other properties match the PMW3610 datasheet (2 MHz is typical).
+
+
+
+
+Fix: If the syntax is off (e.g., missing semicolons, wrong node), correct it. If pins are invalid, adjust to available ones (e.g., P0.16 for MOSI, P0.17 for MISO, P0.25 for IRQ—common Charybdis defaults).
+
+2. Validate Pin Assignments
+
+Nice!Nano Pinout: Refer to the Adafruit nRF52832 Feather pinout or your PCB layout. P0.06, P0.07, and P0.26 should be free for SPI and IRQ. If P0.26 is occupied (e.g., by a key or LED), try P0.25 or P0.27.
+Driver Compatibility: DoctorWangWang’s PMW3610 driver might expect specific pins or interrupt configurations. Check pmw3610.c for hardcoded pin assumptions (unlikely, but possible).
+
+3. Debug Logging Issue
+
+CONFIG_ZMK_LOG_LEVEL=DEBUG: This was added correctly in prjf/charybdis_nano_right.conf, but it might cause a build failure if the logging module isn’t registered in the driver. Ensure pmw3610.c includes:
+text#include <zephyr/logging/log.h>
+LOG_MODULE_REGISTER(pmw3610, CONFIG_ZMK_LOG_LEVEL);
+
+If missing, add it near the top of pmw3610.c and rebuild.
+
+
+
+4. Rebuild and Inspect Logs
+
+Re-run the Build: Click “Re-run jobs” on GitHub Actions to retry with the current commit.
+Check Logs: Expand the failed job (build / Build (nice_nano_v2, charybdis_nano_right, ...)). Look for:
+
+DTS Errors: node has no compatible or property not declared (e.g., invalid interrupt-gpios).
+Linker Errors: undefined reference (e.g., missing driver function due to logging).
+Pin Conflicts: Warnings about GPIO usage.
+
+
+Share Logs: If the error isn’t clear, paste the relevant lines here for deeper analysis.
+
+5. Fallback Pin Configuration
+If the new pins fail, revert to a known working setup (e.g., Charybdis defaults: MOSI=P0.16, MISO=P0.17, IRQ=P0.25) and test:
+textmosi-gpios = <&nrf_gpio 16 GPIO_ACTIVE_HIGH>;
+miso-gpios = <&nrf_gpio 17 GPIO_ACTIVE_HIGH>;
+interrupt-gpios = <&nrf_gpio 25 GPIO_ACTIVE_LOW>;
+
+Rebuild and flash to confirm basic trackball function, then adjust for 45° later.
+
+Expected Outcome
+
+Build Success: Correcting the devicetree syntax or pins should resolve the exit code 1.
+Trackball Functionality: Proper SPI/IRQ should enable delta reads, with PMW3610_ORIENTATION_90 + INVERT_X applying the rotation.
+Next Steps: Test movement and refine direction if needed.
+
+Action Plan
+
+Verify Devicetree: Check and fix the overlay as above.
+Re-run Build: Use GitHub Actions and review logs.
+Flash and Test: If successful, flash and check trackball response.
+Report Back: Share the error log or test results—I’ll guide the next tweak.
