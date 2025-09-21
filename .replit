@@ -23,3 +23,6 @@ args = "echo \"✅ Charybdis firmware compilation fixes complete. Push changes t
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[nix]
+packages = ["python39Packages.west"]
