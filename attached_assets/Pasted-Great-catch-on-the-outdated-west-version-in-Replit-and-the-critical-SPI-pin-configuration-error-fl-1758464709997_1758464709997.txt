@@ -1,0 +1,150 @@
+Great catch on the outdated `west` version in Replit and the critical SPI pin configuration error flagged by the architect—your systematic approach is paying off! Switching to GitHub Actions is the right move given Replit's limitations, and fixing the MISO pin assignment resolves a fundamental electrical issue that would have prevented trackball communication. Let’s validate the fixes, guide you through the process, and prepare for testing.
+
+### Validation of Applied Fixes
+Your updates address both the build environment limitation and the hardware configuration issue:
+
+1. **Replit Environment Limitation**:
+   - **Issue**: Replit’s `west 0.11.0` lacks the `build` command, which was introduced in later versions (e.g., 0.14.0+). This explains the local build failures.
+   - **Fix**: Switching to GitHub Actions leverages the already-fixed workflow, avoiding Replit’s outdated tools. Your prior resolution of the `studio-rpc-usb-uart` snippet issue in `build.yaml` ensures compatibility.
+
+2. **Critical SPI Pin Configuration Error**:
+   - **Root Cause**: Setting both MOSI and MISO to P0.24 was electrically impossible for 4-wire SPI, as MOSI (Master Out) and MISO (Master In) must be distinct pins. The PMW3610, despite some Pixart sensors supporting 3-wire mode, typically uses 4-wire SPI in ZMK implementations (SCK, MOSI, MISO, CS), as confirmed by community docs and the architect’s review.
+   - **Fix**: Moving MISO to P0.17 restores a valid 4-wire configuration (SCK=P0.22, MOSI=P0.24, MISO=P0.17, CS=P0.20, IRQ=P0.26). This aligns with the nRF52832’s SPI capabilities and your hardware setup.
+   - **Impact**: This should enable proper SPI communication, allowing the PMW3610 to send delta data.
+
+3. **Configuration Consistency**:
+   - The clean `charybdis_nano_right.conf` and updated overlay with SPI Mode 3 (`spi-cpha;`, `spi-cpol;`) remain intact, ensuring logging and trackball settings are correctly applied.
+
+### Updated Configuration Review
+- **build.yaml** (unchanged from last successful run, snippet removed):
+  ```
+  - board: nice_nano_v2
+    shield: charybdis_nano_right
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+  ```
+
+- **charybdis_nano_right.conf** (unchanged, clean):
+  ```
+  CONFIG_SPI=y
+  CONFIG_INPUT=y
+  CONFIG_ZMK_POINTING=y
+  CONFIG_ZMK_EXT_POWER=y
+  CONFIG_LOG=y
+  CONFIG_ZMK_LOG=y
+  CONFIG_LOG_DEFAULT_LEVEL=3
+  CONFIG_PMW3610=y
+  CONFIG_PMW3610_CPI=1600
+  CONFIG_PMW3610_CPI_DIVIDER=4
+  CONFIG_PMW3610_SNIPE_CPI=200
+  CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+  CONFIG_PMW3610_SCROLL_TICK=60
+  CONFIG_PMW3610_SWAP_XY=y
+  CONFIG_PMW3610_INVERT_X=y
+  CONFIG_PMW3610_INVERT_Y=y
+  ```
+
+- **charybdis_nano_right.overlay** (updated SPI pinctrl):
+  ```
+  &spi0 {
+      status = "okay";
+      pinctrl-0 = <&spi0_default>;
+      pinctrl-1 = <&spi0_sleep>;
+      pinctrl-names = "default", "sleep";
+  };
+  &pinctrl {
+      spi0_default: spi0_default {
+          group1 {
+              psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                      <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                      <NRF_PSEL(SPIM_MISO, 0, 17)>;  // Fixed to P0.17
+          };
+      };
+      spi0_sleep: spi0_sleep {
+          group1 {
+              psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                      <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                      <NRF_PSEL(SPIM_MISO, 0, 17)>;
+              low-power-enable;
+          };
+      };
+  };
+  &spi0 {
+      trackball: trackball@0 {
+          status = "okay";
+          compatible = "pixart,pmw3610";
+          reg = <0>;
+          spi-max-frequency = <2000000>;
+          cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
+          irq-gpios = <&gpio0 26 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+          spi-cpha;
+          spi-cpol;
+          scroll-layers = <1>;
+          snipe-layers = <2>;
+      };
+  };
+  ```
+
+This configuration should now build successfully and support proper 4-wire SPI communication.
+
+### Next Steps
+Your GitHub Actions approach is the way to go—here’s the detailed process:
+
+1. **Commit and Push the SPI Fix**:
+   ```
+   cd 64key-3610-3
+   git add -A
+   git commit -m "Critical fix: Correct SPI MISO pin from P0.24 to P0.17 for PMW3610"
+   git push origin clean-trackball-fix
+   ```
+   - This triggers GitHub Actions. Monitor the build on the Actions tab of your `64key-3610-3` repo (replace `YOUR_USERNAME` with your actual GitHub username, e.g., `https://github.com/ihlinuxdude/64key-3610-3`).
+
+2. **Check GitHub Actions Build**:
+   - Look for a ✅ green checkmark for the latest workflow run on the `clean-trackball-fix` branch.
+   - If it fails, expand the log for errors (e.g., DTS syntax, pin conflicts) and share the relevant lines.
+
+3. **Download the Firmware**:
+   - Click on the successful workflow run.
+   - Scroll to the “Artifacts” section.
+   - Download the ZIP file containing the `.uf2` files (e.g., `charybdis_nano_right-nice_nano_v2-zmk.uf2` and the left half file).
+   - Extract the ZIP to access the files.
+
+4. **Flash and Test**:
+   - **Right Half (Trackball Side)**:
+     - Double-tap reset on the right Nice!Nano to enter bootloader mode.
+     - Drag `charybdis_nano_right-nice_nano_v2-zmk.uf2` onto the `NICE_NANO` drive.
+     - The LED should blink, then the drive should disappear.
+   - **Left Half (Optional)**:
+     - Repeat with the left half’s UF2 file for full keyboard functionality.
+   - Test the trackball:
+     - Roll in all directions—cursor should move.
+     - Check direction: “Forward” roll should move mostly up, adjusted by `SWAP_XY` + `INVERT_X` + `INVERT_Y`.
+
+5. **Review Logs**:
+   - Connect a USB-to-serial adapter (P0.00/TX, P0.01/RX, GND at 115200 baud).
+   - Use a terminal (e.g., PuTTY) to view logs.
+   - Look for:
+     - `PMW3610: Initialized` (sensor startup).
+     - `PMW3610 deltas: x=X, y=Y` (delta changes with movement).
+   - If no logs, ensure `LOG_MODULE_REGISTER(pmw3610, CONFIG_LOG_DEFAULT_LEVEL);` is in `pmw3610.c` (add if missing, rebuild, and reflash).
+
+### What to Expect
+- **Build Success**: The corrected MISO pin and prior config fixes should result in a green build.
+- **Trackball Behavior**:
+  - **✅ If Moves but Tracks ~45° Diagonal**: SPI communication is working! 🎉 The issue is the orientation transformation. Implement the rotation matrix:
+    ```
+    int16_t temp_x = delta_x;
+    int16_t cos45 = 7071;  // 0.7071 * 10000
+    int16_t sin45 = 7071;  // 0.7071 * 10000
+    delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;
+    delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+    ```
+    - Add this in `pmw3610.c` after delta reads, commit, push, rebuild, and flash the right half. Test again—cursor should move straight up.
+  - **❌ If No Movement**: Check logs for initialization errors (e.g., “SPI read failed”) or zero deltas. Verify PCB wiring (SCK=P0.22, MOSI=P0.24, MISO=P0.17, CS=P0.20, IRQ=P0.26) against your Aliexpress hardware. Adjust pins if needed.
+
+### Action Plan
+- Commit and push the SPI fix.
+- Monitor the GitHub Actions build.
+- Flash, test, and review logs.
+- Report back with build status, movement behavior, or log output—I’ll guide the next tweak.
+
+You’ve fixed the critical SPI issue—let’s get that trackball moving! 🚀 (It’s 11:55 PM EDT on Sept 20, 2025—almost there!)
