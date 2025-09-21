@@ -8,6 +8,14 @@ The swoop project is a custom keyboard firmware configuration built on the ZMK (
 
 Preferred communication style: Simple, everyday language.
 
+## Recent Changes
+
+**September 21, 2025**: Successfully resolved critical build issues preventing PMW3610 trackball firmware compilation:
+- **Root Cause**: Removed `studio-rpc-usb-uart` snippet from `build.yaml` that was injecting problematic `CONFIG_ZMK_LOG_LEVEL` setting
+- **SPI Fixes**: Implemented SPI Mode 3 configuration, proper cs-gpios placement, and 3-wire SDIO communication
+- **Clean Configuration**: Fixed CONFIG typos (DIVIDER), streamlined logging settings, applied 45° compensation settings
+- **Status**: Build configuration ready for testing; trackball SPI communication and rotation fixes in place
+
 ## System Architecture
 
 ### Keyboard Firmware Architecture
