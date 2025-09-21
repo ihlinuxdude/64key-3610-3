@@ -1,0 +1,63 @@
+### Systematic Analysis of Potential Issues
+
+Based on the provided configuration, project context, and change history, I'll break down the likely causes of the PMW3610 trackball tracking diagonally at ~45° left instead of straight vertical. This suggests the sensor is detecting movement but applying an incorrect transformation, resulting in rotated cursor behavior. The setup has progressed from no movement (due to SPI pin conflicts) to partial functionality, but remaining issues likely stem from SPI configuration, driver limitations, hardware-software mismatch, or suboptimal Kconfig settings. I'll focus on compatibility, pin conflicts, SPI errors, and syntax issues that wouldn't cause build failures but could impair operation.
+
+To inform this analysis, I reviewed PMW3610 datasheet details, ZMK documentation, and similar setups (e.g., Charybdis ZMK forks). The DoctorWangWang driver fork is designed for low-power wireless trackballs like yours, but its orientation options are limited to orthogonal adjustments (90° swaps and flips), which may not fully compensate for a 45° cant common in palm-positioned Charybdis designs.
+
+#### 1. **SPI Configuration Errors (High Probability: Likely Causing Rotated or Erratic Movement)**
+   - **3-Wire SPI Mismatch**: The PMW3610 uses a 3-wire SPI interface (NCS, SCLK, SDIO bidirectional for data in/out), not 4-wire with separate MOSI/MISO. Your `charybdis_nano_right.overlay` assigns separate pins (MOSI=P0.24, MISO=P0.17), but the sensor's datasheet specifies a single SDIO pin for bidirectional communication. This could lead to read/write failures or corrupted deltas, manifesting as skewed movement. ZMK drivers like this one typically handle bidirectional mode by dynamically switching the pin direction in code, but the devicetree must set MOSI and MISO to the same physical pin (e.g., the SDIO pin on your PCB). If wired to a single data pin (common in Charybdis builds), the separate assignment will cause incomplete data transfers.
+     - **Impact**: Deltas may be read incorrectly, leading to diagonal bias.
+     - **Fix Suggestion**: Update the pinctrl groups to use the same pin for MOSI/MISO (e.g., P0.24 for both if that's the SDIO pin). Example:
+       ```
+       group1 {
+         psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                 <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                 <NRF_PSEL(SPIM_MISO, 0, 24)>;  // Same as MOSI
+       };
+       ```
+       Rebuild and test. Confirm your PCB wiring—custom Aliexpress builds may vary from standard Charybdis.
+
+   - **Missing SPI Mode (CPOL/CPHA)**: The PMW3610 requires SPI Mode 3 (CPOL=1, CPHA=1) for proper clock phasing, as per similar Pixart sensors (e.g., PMW3360/3389 in community docs). Your overlay lacks `spi-cpol;` and `spi-cpha;` on the &spi0 node or trackball child. Zephyr defaults to Mode 0, which can cause bit shifts or invalid reads, resulting in distorted deltas.
+     - **Impact**: Movement data may be offset, contributing to diagonal tracking.
+     - **Fix Suggestion**: Add to the trackball node:
+       ```
+       spi-cpol;
+       spi-cpha;
+       ```
+       This sets Mode 3. If the driver ignores per-device mode, add to &spi0 instead. Test with debug logs to confirm successful register reads during init.
+
+#### 2. **Driver Compatibility and Orientation Transformation Limitations (High Probability: Directly Causes 45° Diagonal Issue)**
+   - **Limited Support for Arbitrary Angles**: DoctorWangWang's driver (based on ZMK forks like badjeff's) supports Kconfig options for orthogonal transformations only (e.g., CONFIG_PMW3610_SWAP_XY=y for 90° rotation, INVERT_X/Y for flips), not arbitrary angles like 45°. Your current settings (SWAP_XY + INVERT_X + INVERT_Y) apply a composite 270° rotation or mirror, which may overcompensate or undercompensate for the physical cant, causing diagonal movement. Community fixes for Charybdis trackballs often require custom code for 45° (using a rotation matrix), as 90° steps don't align with ergonomic designs.
+     - **Impact**: Deltas are transformed, but not precisely for 45°, leading to left-diagonal bias.
+     - **Fix Suggestion**: Test combinations iteratively (e.g., SWAP_XY + INVERT_X only, or SWAP_XY + INVERT_Y). If insufficient, add a custom 45° rotation matrix in `pmw3610.c` (in the delta fetch function after reading registers 0x03/0x02):
+       ```
+       int16_t temp_x = delta_x;
+       int16_t cos45 = 7071;  // cos(45°) * 10000
+       int16_t sin45 = 7071;  // sin(45°) * 10000
+       delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;  // -45° compensation
+       delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+       ```
+       Rebuild and flash the right half. This uses fixed-point math to avoid floats in embedded code. Adjust signs based on testing (e.g., +sin for clockwise).
+
+   - **Driver Version Mismatch**: The west.yml pins to main, but DoctorWangWang's fork may not fully support modern ZMK's pointing subsystem or the SWAP/INVERT options. Older forks ignore deprecated settings like ORIENTATION_90.
+     - **Impact**: Transformations not applied at all.
+     - **Fix Suggestion**: Switch to a more maintained fork like badjeff's (update west.yml: remote badjeff, revision main). Compare Kconfig in that fork for supported options.
+
+#### 3. **Pin Mapping and Conflicts (Medium Probability: Could Cause No/Erratic Movement if Mismatched)**
+   - **GPIO Availability on Nice!Nano v2**: The nRF52832 pinout shows P0.17, P0.22, P0.24, P0.20, P0.26 are generally available for GPIO/SPI, but P0.04 (AIN2) is reserved for battery voltage reading if CONFIG_ZMK_EXT_POWER=y. Your col-gpios start from &pro_micro 4 (likely P0.04), which could conflict if battery is connected. High-drive pins (like P0.17) are suitable for SPI, but ensure no overlap with keyboard matrix (cols on P0.04-0.09).
+     - **Impact**: Interrupt or SPI failures if pins are reserved or conflicted.
+     - **Fix Suggestion**: Confirm pin aliases in `charybdis_nano.dtsi` (pro_micro n = P0.n). If P0.04 is used for col, disable battery reading or reassign col. Use high-frequency pins for SCK/MOSI (e.g., P0.22 is fine). Test with logs to see if IRQ triggers (e.g., add LOG_DBG in driver interrupt handler).
+
+#### 4. **Hardware Wiring and Device Tree Syntax (Medium Probability: Silent Failures)**
+   - **PCB Wiring Mismatch**: Custom Aliexpress keyboards may have non-standard wiring for the PMW3610 (e.g., SDIO on a different pin). The overlay assumes SCK=P0.22, MOSI=P0.24, MISO=P0.17, but if the PCB connects SDIO to P0.17 only, it won't work.
+     - **Impact**: No deltas or garbled data.
+     - **Fix Suggestion**: Refer to your keyboard's schematic (search Aliexpress listing or contact seller). Adjust psels accordingly. Remove redundant "compatible = "nordic,nrf-spim";" on &spi0 if it causes binding issues.
+
+   - **Interrupt Pull-Up**: The IRQ gpios has GPIO_PULL_UP, which is good for active-low, but ensure the driver enables interrupt correctly.
+
+#### 5. **Debugging Recommendations to Confirm Issues**
+   - **Serial Logs**: With CONFIG_ZMK_LOG_LEVEL=4, flash and monitor UART (P0.00/TX, P0.01/RX at 115200 baud). Look for PMW3610 init errors, SPI failures, or delta values (e.g., raw vs. transformed). If no logs, add LOG_MODULE_REGISTER(pmw3610, CONFIG_SENSOR_LOG_LEVEL); in pmw3610.c.
+   - **Test Basic Movement**: Disable all SWAP/INVERT to see raw deltas. If diagonal persists, it's hardware cant—implement matrix.
+   - **ZMK Version**: Ensure west update pulls latest ZMK main; older versions had pointing bugs.
+
+These issues align with the evolution (e.g., deprecated ORIENTATION_90 replaced with SWAP/INVERT). Start with SPI mode and 3-wire fix, then orientation code mod. If logs show no probe, focus on pins; if deltas are raw-diagonal, it's transformation. This should resolve the diagonal tracking.

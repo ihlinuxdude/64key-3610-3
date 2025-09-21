@@ -1,0 +1,234 @@
+Awesome detail — that helps a ton. Here’s a **surgical debug plan + concrete patches** to get your PMW3610 behaving, and to separate “wiring/SPI issues” from the real “45° rotation” problem.
+
+---
+
+# 🔎 What’s still off (quick reads from your config)
+
+1. **`cs-gpios` is on the SPI bus node, not the device.**
+   In Zephyr, `cs-gpios` belongs on the *child* node (the PMW3610), not on `&spi0`. If CS isn’t asserted, the sensor “sort of” responds (or not) → weird diagonals / no motion.
+
+2. **SPI mode not specified.**
+   PixArt sensors expect **SPI mode 3**. Without `spi-cpha; spi-cpol;` you’re likely on mode 0 → corrupted/aliased reads.
+
+3. **Unnecessary/fragile override:**
+   `compatible = "nordic,nrf-spim";` under `&spi0` is usually **not** needed and can cause confusion. The SoC DTS already binds it.
+
+4. **Kconfig typos / no-ops:**
+   `DIVIDOR` looks misspelled (should be **DIVIDER**). If the symbol doesn’t exist, the build just **ignores it**. (Won’t cause 45°, but good to fix and verify in `.config`.)
+
+5. **90° vs 45°:**
+   `SWAP_XY`/`INVERT_X`/`INVERT_Y` only cover **0/90/180/270**. A true **\~45°** physical cant needs a rotate processor (small module), not just driver flags.
+
+---
+
+# ✅ Minimal patches to get clean SPI + CS + mode
+
+**`config/boards/shields/charybdis_nano/charybdis_nano_right.overlay`** — replace your `&spi0` block with this:
+
+```dts
+&spi0 {
+    status = "okay";
+    // no 'compatible' override here
+
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    trackball: pmw3610@0 {
+        status = "okay";
+        compatible = "pixart,pmw3610";
+        reg = <0>;                         // CS index 0 on this bus
+        spi-max-frequency = <2000000>;
+        spi-cpha;                          // MODE 3
+        spi-cpol;                          // MODE 3
+
+        cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
+        irq-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>; // drop pull-up here; add in driver if needed
+
+        scroll-layers = <1>;
+        snipe-layers  = <2>;
+        // automouse-layer = <3>;
+    };
+};
+```
+
+> Keep your `pinctrl` groups as-is (SCK=P0.22, MOSI=P0.24, MISO=P0.17). Just ensure those pins are really free on nice!nano **v2 (nRF52840)** and actually wired on your PCB header.
+
+---
+
+# 🧠 Confirm the Kconfig actually takes effect
+
+In `config/charybdis_nano_right.conf`, fix the typos and enable logs:
+
+```conf
+CONFIG_SPI=y
+CONFIG_INPUT=y
+CONFIG_ZMK_POINTING=y
+CONFIG_ZMK_EXT_POWER=y
+
+CONFIG_PMW3610=y
+CONFIG_PMW3610_CPI=1600
+
+# (If your driver supports these exact names, use *DIVIDER*, not DIVIDOR)
+CONFIG_PMW3610_CPI_DIVIDER=4
+CONFIG_PMW3610_SNIPE_CPI=200
+CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+CONFIG_PMW3610_SCROLL_TICK=60
+
+# 90/180 tools (won’t fix a 45° mount, but keep handy)
+CONFIG_PMW3610_SWAP_XY=y
+CONFIG_PMW3610_INVERT_X=y
+CONFIG_PMW3610_INVERT_Y=y
+
+# Polling / algorithm (verify these symbols exist in your driver)
+CONFIG_PMW3610_POLLING_RATE_125_SW=y
+CONFIG_PMW3610_SMART_ALGORITHM=y
+
+# Logging to see probe + motion
+CONFIG_LOG=y
+CONFIG_ZMK_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+# If your driver has a log Kconfig, e.g.:
+# CONFIG_PMW3610_LOG_LEVEL_DBG=y  or  CONFIG_PMW3610_LOG_LEVEL=4
+```
+
+**Sanity check in CI (optional but powerful):** add a step to print the effective config after build:
+
+```bash
+grep -E "PMW3610|ZMK_POINTING|SPI" build/zephyr/.config || true
+```
+
+If you still see `…attempt to assign value to undefined symbol PMW3610_CPI_DIVIDOR…`, you’ll know exactly which Kconfig names to correct.
+
+---
+
+# 🧪 What to look for in logs (fast triage)
+
+After flashing the right half:
+
+* ✅ **Good probe**: you should see the PMW3610 driver “init/probe OK” (or at least no probe error).
+* ❌ **Bad probe**: messages like `-ENODEV`, `-EIO`, `-EINVAL`, or timeouts → revisit CS pin placement and **SPI mode 3**.
+* Move **straight up** on the ball and print raw deltas (temporarily add a log in the driver or enable any existing “raw dx/dy” debug):
+
+  * If you see **dx ≈ 0, dy ≫ 0** but cursor goes diagonal: the rotation is being applied later (unlikely).
+  * If you see **|dx| ≈ |dy|** with consistent sign pattern on pure vertical motion → the sensor is physically canted → you need **arbitrary rotate** (45°), not swap/invert.
+
+---
+
+# 🧭 If motion works but is still 45° off: add a rotate processor
+
+Stock ZMK doesn’t rotate by arbitrary angles; add the tiny input-processor module and wire it to your pointing listener.
+
+**Module skeleton (once per repo):**
+
+```
+modules/pointer-rotate/
+├─ zephyr/module.yml
+├─ CMakeLists.txt
+├─ dts/bindings/zmk,pointer-rotate.yaml
+└─ src/pointer_rotate.c
+```
+
+`zephyr/module.yml`
+
+```yaml
+name: pointer_rotate
+build:
+  cmake: .
+```
+
+`CMakeLists.txt`
+
+```cmake
+zephyr_library()
+zephyr_library_sources(src/pointer_rotate.c)
+```
+
+`dts/bindings/zmk,pointer-rotate.yaml`
+
+```yaml
+compatible: "zmk,pointer-rotate"
+description: "Rotate relative pointer motion by a fixed angle"
+properties:
+  angle-deg:
+    type: int
+    required: true
+```
+
+`src/pointer_rotate.c` (core)
+
+```c
+#include <zmk/events/pointer_event.h>
+#include <math.h>
+
+struct pr_cfg { int angle_deg; float c, s; };
+
+static int pr_listener(const struct zmk_input_listener *l, struct zmk_pointer_report *r) {
+    const struct pr_cfg *cfg = l->config;
+    float dx = r->dx, dy = r->dy;
+    float dxp = dx*cfg->c - dy*cfg->s;
+    float dyp = dx*cfg->s + dy*cfg->c;
+    r->dx = (int)lrintf(dxp);
+    r->dy = (int)lrintf(dyp);
+    return 0;
+}
+
+static int pr_init(const struct zmk_input_listener *l) {
+    struct pr_cfg *cfg = (struct pr_cfg *)l->config;
+    float rad = (float)cfg->angle_deg * (float)M_PI / 180.0f;
+    cfg->c = cosf(rad); cfg->s = sinf(rad);
+    return 0;
+}
+
+ZMK_INPUT_LISTENER_DEFINE(pointer_rotate, pr_listener, pr_init, struct pr_cfg);
+```
+
+**Wire it in your keymap overlay** (and fix the earlier DT label error):
+
+```dts
+/ {
+    pointer_rotate0: pointer_rotate_0 {
+        compatible = "zmk,pointer-rotate";
+        angle-deg = <45>;  // tune ±5° once working
+    };
+};
+
+&trackball_listener {
+    // If you keep swap/invert too, put them BEFORE rotate:
+    processors = <&pointer_rotate0>;
+};
+```
+
+**Build matrix flag (correct arg name!)** in `build.yaml`:
+
+```yaml
+include:
+  - board: nice_nano_v2
+    shield: charybdis_nano_right
+    cmake-args: >
+      -DZMK_EXTRA_MODULES=$GITHUB_WORKSPACE/modules/pointer-rotate
+```
+
+*(Common pitfall: people use `-DZEphyr_EXTRA_MODULES` or put the node label in DT but forget to define it. Your earlier log showed exactly that — undefined `pointer_rotate0`.)*
+
+---
+
+# 🧰 Hardware cross-checks (just to rule out gremlins)
+
+* **Pin reality check** (nice!nano **v2** = nRF52840): make sure **P0.22 / P0.24 / P0.17 / P0.20 / P0.26** are truly accessible on your PCB and *not* used by anything else (UART, RGB, matrix, etc.).
+* **IRQ line**: rising vs falling edge is handled in driver; if you still get no motion, try temporarily disabling IRQ and polling-only (if your driver supports it) to validate SPI transactions first.
+* **Power**: `CONFIG_ZMK_EXT_POWER=y` is good if your sensor VCC is switched.
+
+---
+
+# 🧪 Step-by-step test sequence (15 minutes end-to-end)
+
+1. Apply the **overlay patch** (move `cs-gpios`, add `spi-cpha; spi-cpol;`, drop the bus `compatible`).
+2. Fix typos in `.conf`; enable logs.
+3. Build & flash right half. Watch boot logs — confirm PMW3610 probe OK.
+4. Move the ball **straight up**; if diagonals persist but raw dx/dy look healthy, proceed.
+5. Add the **rotate processor**, set `angle-deg = <45>`, rebuild, flash. Fine-tune ±5° if needed.
+
+---
+
+Want me to hand-edit your `charybdis_nano_right.overlay` and `build.yaml` as a patch/diff you can paste in? If you drop the two files here, I’ll return exact diffs ready to commit.
