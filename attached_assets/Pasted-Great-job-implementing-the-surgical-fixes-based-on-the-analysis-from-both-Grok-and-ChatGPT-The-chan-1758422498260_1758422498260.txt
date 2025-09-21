@@ -1,0 +1,138 @@
+Great job implementing the surgical fixes based on the analysis from both Grok and ChatGPT! The changes address the critical SPI configuration issues and configuration typos, which should resolve the build failures and potentially get the PMW3610 trackball communicating properly. Let’s validate your updates, guide you through the next steps, and prepare for testing.
+
+### Validation of Applied Fixes
+Your updates align with the identified issues and proposed solutions:
+
+1. **SPI Communication Problems**:
+   - **SPI Mode 3**: Adding `spi-cpha;` and `spi-cpol;` to the trackball node matches the PMW3610’s requirement for Mode 3 (CPOL=1, CPHA=1), correcting potential bit-shift errors that could cause diagonal movement.
+   - **CS Pin Location**: Moving `cs-gpios` to the device node (trackball@0) follows Zephyr’s binding conventions, ensuring the chip select is properly scoped to the PMW3610.
+   - **3-Wire SPI**: Setting both MOSI and MISO to P0.24 (SDIO) corrects the previous 4-wire misconfiguration, aligning with the PMW3610’s bidirectional data line. This should restore SPI communication.
+   - **Removed Bad Override**: Eliminating the redundant `compatible = "nordic,nrf-spim";` on &spi0 avoids potential binding conflicts, streamlining the configuration.
+
+2. **Configuration Problems**:
+   - **Fixed Typos**: Changing `CONFIG_PMW3610_CPI_DIVIDOR` to `CONFIG_PMW3610_CPI_DIVIDER` resolves a syntax error, ensuring proper CPI scaling (e.g., 1600 CPI / 4 = 400 CPI effective).
+   - **Added Debugging**: Enabling logging with `CONFIG_ZMK_LOG_LEVEL=4` (assuming you corrected the earlier `DEBUG` typo) will provide visibility into SPI and sensor initialization.
+
+3. **Pin Assignment**:
+   - **No Conflicts**: Pins (SCK=P0.22, SDIO=P0.24, CS=P0.20, IRQ=P0.26) are separate from the keyboard matrix (P0.04-P0.09), avoiding GPIO clashes.
+   - **Proper Wiring**: These assignments are plausible for the Nice!Nano v2’s nRF52832, though we’ll confirm against your PCB.
+
+### Updated Configuration Review
+Based on your description, the revised files should look like this (adjust if I’ve misinterpreted):
+
+- **charybdis_nano_right.conf**:
+  ```
+  CONFIG_SPI=y
+  CONFIG_INPUT=y
+  CONFIG_ZMK_POINTING=y
+  CONFIG_ZMK_EXT_POWER=y
+  CONFIG_PMW3610=y
+  CONFIG_PMW3610_CPI=1600
+  CONFIG_PMW3610_CPI_DIVIDER=4
+  CONFIG_PMW3610_SNIPE_CPI=200
+  CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+  CONFIG_PMW3610_SCROLL_TICK=60
+  CONFIG_PMW3610_SWAP_XY=y
+  CONFIG_PMW3610_INVERT_X=y
+  CONFIG_PMW3610_INVERT_Y=y
+  CONFIG_PMW3610_POLLING_RATE_125_SW=y
+  CONFIG_PMW3610_SMART_ALGORITHM=y
+  CONFIG_ZMK_LOG_LEVEL=4
+  ```
+
+- **charybdis_nano_right.overlay** (updated section):
+  ```
+  &spi0 {
+      status = "okay";
+      pinctrl-0 = <&spi0_default>;
+      pinctrl-1 = <&spi0_sleep>;
+      pinctrl-names = "default", "sleep";
+  };
+  &pinctrl {
+      spi0_default: spi0_default {
+          group1 {
+              psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                      <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                      <NRF_PSEL(SPIM_MISO, 0, 24)>;  // Both to P0.24 for SDIO
+          };
+      };
+      spi0_sleep: spi0_sleep {
+          group1 {
+              psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                      <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                      <NRF_PSEL(SPIM_MISO, 0, 24)>;
+              low-power-enable;
+          };
+      };
+  };
+  &spi0 {
+      trackball: trackball@0 {
+          status = "okay";
+          compatible = "pixart,pmw3610";
+          reg = <0>;
+          spi-max-frequency = <2000000>;
+          cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;  // Moved here
+          irq-gpios = <&gpio0 26 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+          spi-cpha;
+          spi-cpol;
+          scroll-layers = <1>;
+          snipe-layers = <2>;
+      };
+  };
+  ```
+
+These changes should resolve the build issues and enable SPI communication, assuming the PCB wiring matches.
+
+### Next Steps
+Your plan to push and test is solid. Here’s the detailed process:
+
+1. **Push to GitHub**:
+   ```
+   cd ../fresh-fork
+   git add -A
+   git commit -m "Fix: Critical SPI issues - Mode 3, cs-gpios placement, 3-wire SDIO, CONFIG typos"
+   git push origin clean-trackball-fix
+   ```
+   - This triggers GitHub Actions. Monitor the build status on the Actions tab of your `64key-3610-3` repo.
+
+2. **Check GitHub Actions**:
+   - Look for a successful build (all green checks). If it fails, expand the log for errors (e.g., DTS syntax, pin conflicts) and share the relevant lines.
+
+3. **Flash and Test**:
+   - Download the UF2 artifact for the right half.
+   - Double-tap reset on the right Nice!Nano, drag the UF2 file.
+   - Test the trackball:
+     - Roll in all directions—cursor should move.
+     - Check direction: “Forward” roll should move mostly up, adjusted by SWAP_XY + INVERT_X/Y.
+
+4. **Review Logs**:
+   - Connect a USB-to-serial adapter (P0.00/TX, P0.01/RX, GND at 115200 baud).
+   - Use a terminal (e.g., PuTTY) to view logs.
+   - Look for:
+     - `PMW3610: Initialized` (sensor startup).
+     - `PMW3610 deltas: x=X, y=Y` (delta changes with movement).
+   - If no logs or errors appear, ensure `LOG_MODULE_REGISTER(pmw3610, CONFIG_ZMK_LOG_LEVEL);` is in `pmw3610.c`.
+
+### What to Expect
+- **✅ If Trackball Works but Tracks 45° Diagonal**:
+  - SPI communication is fixed! The remaining issue is the orientation transformation. The SWAP_XY + INVERT_X + INVERT_Y combination may not precisely match the 45° cant. Implement the 45° rotation matrix from ChatGPT’s suggestion:
+    ```
+    int16_t temp_x = delta_x;
+    int16_t cos45 = 7071;  // 0.7071 * 10000
+    int16_t sin45 = 7071;  // 0.7071 * 10000
+    delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;
+    delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+    ```
+    - Add this in `pmw3610.c` after delta reads, commit, push, rebuild, and flash.
+  - Test again—cursor should move straight up.
+
+- **❌ If Trackball Still Doesn’t Work**:
+  - Check logs for PMW3610 probe errors (e.g., “SPI read failed”) or zero deltas.
+  - Verify PCB wiring against the overlay (SCK=P0.22, SDIO=P0.24, CS=P0.20, IRQ=P0.26). If mismatched, adjust pins to match your hardware (e.g., check Aliexpress listing or schematic).
+
+### Action Plan
+- Push the changes and monitor the build.
+- Flash, test, and review logs.
+- Report back with build status, movement behavior, or log output—I’ll guide the next tweak.
+
+You’ve nailed the critical fixes—let’s get that trackball tracking straight! 🚀 (It’s 10:50 PM EDT on Sept 20, 2025—exciting late-night progress!)
