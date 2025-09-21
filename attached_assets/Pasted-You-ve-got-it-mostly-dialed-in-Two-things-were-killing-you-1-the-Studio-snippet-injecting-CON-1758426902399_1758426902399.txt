@@ -1,0 +1,167 @@
+You’ve got it mostly dialed in. Two things were killing you:
+
+1. the Studio snippet injecting `CONFIG_ZMK_LOG_LEVEL`
+2. the MISO/MOSI pin clash (P0.24 used twice)
+
+Here’s a tight, working baseline you can paste in and push.
+
+---
+
+## 1) Matrix build entry (right half) — **no snippet**
+
+`build.yaml`
+
+```diff
+-  - board: nice_nano_v2
+-    shield: charybdis_nano_right
+-    snippet: studio-rpc-usb-uart
+-    cmake-args: >
+-      -DCONFIG_ZMK_STUDIO=y
+-      -DCONFIG_ZMK_STUDIO_LOCKING=n
+-      -DZMK_EXTRA_MODULES=$GITHUB_WORKSPACE/modules/pointer-rotate
++  - board: nice_nano_v2
++    shield: charybdis_nano_right
++    cmake-args: >
++      -DCONFIG_ZMK_STUDIO=y
++      -DCONFIG_ZMK_STUDIO_LOCKING=n
++      -DZMK_EXTRA_MODULES=$GITHUB_WORKSPACE/modules/pointer-rotate
+```
+
+Also make sure your workflow **doesn’t** pass `-S studio-rpc-usb-uart` or `-DSNIPPET=…` anywhere for the right half.
+
+Quick check:
+
+```bash
+git grep -n "studio-rpc-usb-uart"
+```
+
+> Expect **0 hits** for the right-half path.
+
+---
+
+## 2) Right overlay — **SPI Mode 3 + correct pins + CS on device**
+
+`config/boards/shields/charybdis_nano/charybdis_nano_right.overlay`
+
+```dts
+&pinctrl {
+    spi0_default: spi0_default {
+        group1 {
+            /* nice_nano_v2 = nRF52840 */
+            psels = <NRF_PSEL(SPIM_SCK,  0, 22)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 17)>;   /* <-- FIXED */
+        };
+    };
+    spi0_sleep: spi0_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK,  0, 22)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 17)>;
+            low-power-enable;
+        };
+    };
+};
+
+&spi0 {
+    status = "okay";
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    trackball: pmw3610@0 {
+        status = "okay";
+        compatible = "pixart,pmw3610";
+        reg = <0>;
+        spi-max-frequency = <2000000>;
+        spi-cpha;   /* MODE 3 */
+        spi-cpol;   /* MODE 3 */
+
+        cs-gpios  = <&gpio0 20 GPIO_ACTIVE_LOW>;
+        irq-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>; /* add PULL_UP if your PCB lacks one */
+
+        scroll-layers = <1>;
+        snipe-layers  = <2>;
+    };
+};
+```
+
+(And confirm none of `P0.22 / P0.24 / P0.17 / P0.20 / P0.26` are reused by your matrix pins.)
+
+---
+
+## 3) Top configs — **no `ZMK_LOG_LEVEL` anywhere**
+
+Right half: `config/boards/shields/charybdis_nano/charybdis_nano_right.conf`
+
+```conf
+CONFIG_SPI=y
+CONFIG_INPUT=y
+CONFIG_ZMK_POINTING=y
+CONFIG_ZMK_EXT_POWER=y
+
+CONFIG_LOG=y
+CONFIG_ZMK_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3   # use 4 for debug
+
+CONFIG_PMW3610=y
+CONFIG_PMW3610_CPI=1600
+CONFIG_PMW3610_CPI_DIVIDER=4
+CONFIG_PMW3610_SNIPE_CPI=200
+CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+CONFIG_PMW3610_SCROLL_TICK=60
+
+CONFIG_PMW3610_SWAP_XY=y
+CONFIG_PMW3610_INVERT_X=y
+CONFIG_PMW3610_INVERT_Y=y
+```
+
+And make sure your **top-level** `config/charybdis_nano.conf` doesn’t set `CONFIG_ZMK_LOG_LEVEL` either:
+
+```bash
+git grep -n "ZMK_LOG_LEVEL" config || true
+```
+
+> Expect **no** matches.
+
+---
+
+## 4) (Optional) 45° correction
+
+If the sensor still feels \~45° canted after flashing, attach your rotate processor:
+
+```dts
+/ {
+    pointer_rotate0: pointer_rotate_0 {
+        compatible = "zmk,pointer-rotate";
+        angle-deg = <45>;  /* tune 40–50 later */
+    };
+};
+
+&trackball_listener {
+    processors = <&pointer_rotate0>;
+}
+```
+
+…and keep `-DZMK_EXTRA_MODULES=$GITHUB_WORKSPACE/modules/pointer-rotate` in the right-half `cmake-args`.
+
+---
+
+## 5) Build & test (use GitHub Actions; Replit’s west is too old)
+
+```bash
+git add -A
+git commit -m "Fix: remove Studio snippet; correct SPI pins; set Mode 3; clean logs"
+git push
+```
+
+In Actions:
+
+* The **right** job title must *not* contain `studio-rpc-usb-uart`.
+* Kconfig should pass.
+* Flash the right UF2. In ZMK Studio logs, confirm PMW3610 probes OK.
+
+**If motion exists but goes diagonal:** increase/decrease `angle-deg`.
+**If no motion:** paste the first PMW3610 init lines; we’ll check IRQ pull-up and bus timing next.
+
+Tiny correction from earlier: **nice\_nano\_v2 is nRF52840** (not 52832).
