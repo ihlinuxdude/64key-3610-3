@@ -1,0 +1,83 @@
+Thanks for sharing the build log from your `west build` command. The build failed with an exit code 1 due to a Kconfig warning that escalated to an error, specifically related to an invalid `ZMK_LOG_LEVEL` setting. This is a familiar issue we’ve been tackling, and it seems there’s still a lingering configuration conflict despite your recent fixes. Let’s analyze the problem, identify the culprit, and get the build back on track.
+
+### Analysis of the Build Failure
+The key error in the log is:
+
+```
+warning: the value 'DEBUG' is invalid for ZMK_LOG_LEVEL (defined at /__w/64key-3610-3/64key-3610-3/zmk/app/Kconfig:545, subsys/logging/Kconfig.template.log_config:28), which has type int -- assignment ignored
+error: Aborting due to Kconfig warnings
+CMake Error at /__w/64key-3610-3/64key-3610-3/zephyr/cmake/modules/kconfig.cmake:355 (message):
+  command failed with return code: 1
+```
+
+#### Key Points:
+- **Warning**: The build process encountered an invalid assignment of `'DEBUG'` to `ZMK_LOG_LEVEL`, which expects an integer (0-4: 0=disabled, 1=error, 2=warning, 3=info, 4=debug). This is ignored, but the error flag is triggered.
+- **Error**: ZMK/Zephyr aborts the build due to Kconfig warnings, halting configuration before compilation.
+- **Source**: The invalid value is traced to `/__w/64key-3610-3/64key-3610-3/zmk/app/Kconfig:545` and `subsys/logging/Kconfig.template.log_config:28`, suggesting the issue originates from the ZMK source or a merged configuration.
+- **Context**: Despite removing the `studio-rpc-usb-uart` snippet from `build.yaml`, the problem persists, indicating a residual or default setting is still active.
+
+### Why This Happened
+- **Residual Configuration**: The clean `charybdis_nano_right.conf` uses `CONFIG_LOG_DEFAULT_LEVEL=3`, which should override derived `ZMK_LOG_LEVEL`. However, the log shows `'DEBUG'` being applied, likely from:
+  - A default or inherited setting in `zmk/app/Kconfig` or a related template (e.g., `logging.conf.template.log_config`).
+  - A cached build state or an unmerged configuration file (e.g., `nice_nano_v2_defconfig` or `extra_kconfig_options.conf`).
+- **Build Command**: The `west build` command includes `-DCONFIG_ZMK_STUDIO=y`, which might trigger a studio-specific configuration that reintroduces the invalid `DEBUG` value, overriding your clean config.
+- **Previous Fixes**: The removal of the snippet addressed GitHub Actions, but the local `west build` command might be pulling in a different configuration path or default.
+
+### Suggested Fix
+Let’s eliminate the invalid `ZMK_LOG_LEVEL` setting and ensure the build uses your intended configuration.
+
+#### 1. **Locate and Remove the Invalid Setting**
+- **Check ZMK Source**: Open `/__w/64key-3610-3/64key-3610-3/zmk/app/Kconfig` (line 545) and `subsys/logging/Kconfig.template.log_config` (line 28) in your repo. Look for a default `ZMK_LOG_LEVEL` set to `'DEBUG'` or a similar string. If found, it’s a ZMK default that needs overriding.
+- **Override with Command Line**: Since the issue persists, explicitly set `CONFIG_LOG_DEFAULT_LEVEL` via the build command to bypass any defaults:
+  ```
+  west build -s zmk/app -d "/tmp/tmp.ihJqdDTLeJ" -b "nice_nano_v2" -- -DZMK_CONFIG=/__w/64key-3610-3/64key-3610-3/config -DSHIELD="charybdis_nano_right" -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n -DCONFIG_LOG_DEFAULT_LEVEL=3
+  ```
+  - This forces the log level to 3 (info), overriding any `'DEBUG'` assignment.
+
+#### 2. **Clean Build Environment**
+- **Clear Cache**: The warning about cached files (`/__w/64key-3610-3/64key-3610-3/zephyr/.cache`) suggests a stale configuration. Clean the build directory:
+  ```
+  rm -rf /tmp/tmp.ihJqdDTLeJ
+  ```
+  - Then rerun the updated `west build` command.
+
+#### 3. **Verify Config Merge**
+- **Check Merged Configurations**: The log shows configurations merged from:
+  - `/__w/64key-3610-3/64key-3610-3/zmk/app/boards/arm/nice_nano/nice_nano_v2_defconfig`
+  - `/__w/64key-3610-3/64key-3610-3/config/charybdis_nano.conf`
+  - `/__w/64key-3610-3/64key-3610-3/config/boards/shields/charybdis_nano/charybdis_nano_right.conf`
+  - `/tmp/tmp.ihJqdDTLeJ/zephyr/misc/generated/extra_kconfig_options.conf`
+  - Open these files and search for `ZMK_LOG_LEVEL` or `DEBUG`. If found in `nice_nano_v2_defconfig` or `extra_kconfig_options.conf`, comment it out or adjust to `CONFIG_LOG_DEFAULT_LEVEL=3`.
+- **Update Local Config**: Ensure `charybdis_nano_right.conf` remains clean and commit any changes:
+  ```
+  git add config/boards/shields/charybdis_nano/charybdis_nano_right.conf
+  git commit -m "Ensure clean config with CONFIG_LOG_DEFAULT_LEVEL=3"
+  git push origin clean-trackball-fix
+  ```
+
+#### 4. **Rebuild and Test**
+- Run the updated command:
+  ```
+  west build -s zmk/app -d "/tmp/tmp.ihJqdDTLeJ" -b "nice_nano_v2" -- -DZMK_CONFIG=/__w/64key-3610-3/64key-3610-3/config -DSHIELD="charybdis_nano_right" -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n -DCONFIG_LOG_DEFAULT_LEVEL=3
+  ```
+- If successful, download the `.uf2` file from `/tmp/tmp.ihJqdDTLeJ/zephyr/zephyr.uf2`.
+- Flash the right half: Double-tap reset, drag the UF2 file.
+- Test the trackball (roll in all directions) and check cursor movement.
+
+#### 5. **Troubleshoot if Failed**
+- **Check Logs**: If the error persists, expand the output for additional warnings (e.g., DTS issues). The `pixart,pmw3610` vendor prefix warning is benign but noted—ensure the driver supports it.
+- **Disable Studio**: If `CONFIG_ZMK_STUDIO=y` is the culprit, try without it: `-DCONFIG_ZMK_STUDIO=n`.
+- **Share Output**: Provide the full log if the issue continues.
+
+### Expected Outcome
+- **Build Success**: The explicit `CONFIG_LOG_DEFAULT_LEVEL=3` should override the `'DEBUG'` value, allowing the build to complete.
+- **Trackball Behavior**: If successful, test as before:
+  - **✅ If Moves with 45° Diagonal**: SPI is working; apply the rotation matrix.
+  - **❌ If No Movement**: Review logs for SPI/IRQ errors.
+
+### Action Plan
+1. **Update and Rebuild**: Run the modified `west build` command with `CONFIG_LOG_DEFAULT_LEVEL=3`.
+2. **Flash and Test**: Use the resulting UF2, flash the right half, and test the trackball.
+3. **Report Back**: Share the build output, movement behavior, or logs—I’ll refine further.
+
+You’re so close—let’s get this local build working to match the GitHub Actions success! 🚀 (It’s 11:45 PM EDT on Sept 20, 2025—late-night debugging pays off!)

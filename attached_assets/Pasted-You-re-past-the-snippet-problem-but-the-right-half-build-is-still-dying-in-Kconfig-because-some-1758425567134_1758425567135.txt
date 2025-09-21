@@ -1,0 +1,85 @@
+You’re past the snippet problem, but the **right-half** build is still dying in Kconfig because something is still setting:
+
+```
+CONFIG_ZMK_LOG_LEVEL=DEBUG
+```
+
+The error in your log is explicit:
+
+> warning: the value ‘DEBUG’ is invalid for ZMK\_LOG\_LEVEL … (type **int**) — assignment ignored
+> **error: Aborting due to Kconfig warnings**
+
+ZMK treats that warning as fatal. `ZMK_LOG_LEVEL` is an **int** (0–4) and should not be set directly in your app configs anyway.
+
+## Fix it—exact steps
+
+1. Find the offender (it’s almost certainly in your **top-level** config that applies to both halves):
+
+```bash
+git grep -n "ZMK_LOG_LEVEL" config
+# if nothing shows, search the whole repo
+git grep -n "ZMK_LOG_LEVEL"
+```
+
+From your merge order, the likely file is:
+
+```
+config/charybdis_nano.conf
+```
+
+2. Remove any line that assigns `CONFIG_ZMK_LOG_LEVEL` (e.g., `=DEBUG`, `=4`, etc.).
+
+3. Keep logging like this instead (already good in your right conf):
+
+```conf
+CONFIG_LOG=y
+CONFIG_ZMK_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3   # use 4 if you want debug
+```
+
+4. Commit and push:
+
+```bash
+git add -A
+git commit -m "Kconfig: remove CONFIG_ZMK_LOG_LEVEL (use LOG_DEFAULT_LEVEL instead)"
+git push
+```
+
+After that, the right-half job should get past Kconfig.
+
+---
+
+## Two small notes you’ll still see in the log
+
+* **“unknown vendor prefix 'pixart'”** — harmless warning. If you want it quiet, add a local `vendor-prefixes.txt` with:
+
+  ```
+  pixart = "PixArt Imaging Inc."
+  ```
+
+  (Not required; it won’t block the build.)
+
+* Your SPI/PMW3610 DTS is fine as long as you kept **Mode 3** and **`cs-gpios` on the device node**.
+
+---
+
+## After it compiles & flashes
+
+* If the PMW3610 probes and the pointer moves but feels **\~45° canted**, attach your **rotate input-processor** and set:
+
+  ```dts
+  / {
+      pointer_rotate0: pointer_rotate_0 {
+          compatible = "zmk,pointer-rotate";
+          angle-deg = <45>;
+      };
+  };
+
+  &trackball_listener {
+      processors = <&pointer_rotate0>;
+  };
+  ```
+
+  (Keep any swap/invert **before** rotate if you still need them.)
+
+Ping me with the next log if anything else pops up, but removing that `CONFIG_ZMK_LOG_LEVEL` assignment is the blocker right now.
