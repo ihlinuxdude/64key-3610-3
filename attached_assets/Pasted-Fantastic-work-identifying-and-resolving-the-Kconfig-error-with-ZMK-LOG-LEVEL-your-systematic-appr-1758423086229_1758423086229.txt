@@ -1,0 +1,147 @@
+Fantastic work identifying and resolving the Kconfig error with `ZMK_LOG_LEVEL`—your systematic approach to cleaning up the configuration is spot on! The updated fixes address both the SPI communication issues and the build-breaking logging configuration, setting you up for a successful build and trackball testing. Let’s validate the changes, guide you through the push and test process, and prepare for the next steps.
+
+### Validation of Applied Fixes
+Your updates align perfectly with the analysis and previous suggestions:
+
+1. **Kconfig Build Error Resolution**:
+   - **Before**: The presence of `CONFIG_ZMK_LOG_LEVEL` (likely set to a value like 4 or "DEBUG") caused a build failure because `ZMK_LOG_LEVEL` is a derived symbol in ZMK/Zephyr that shouldn’t be set directly in user config files. It’s controlled by `CONFIG_LOG_DEFAULT_LEVEL` or module-specific settings.
+   - **After**: Replacing it with:
+     ```
+     CONFIG_LOG=y
+     CONFIG_ZMK_LOG=y
+     CONFIG_LOG_DEFAULT_LEVEL=3
+     ```
+     - `CONFIG_LOG=y` enables the logging subsystem.
+     - `CONFIG_ZMK_LOG=y` activates ZMK-specific logging.
+     - `CONFIG_LOG_DEFAULT_LEVEL=3` sets the default log level to info (0=disabled, 1=error, 2=warning, 3=info, 4=debug), providing useful output without the invalid `ZMK_LOG_LEVEL` error. This is a valid Zephyr approach and should resolve the build issue.
+
+2. **SPI Communication Fixes**:
+   - **SPI Mode 3**: Adding `spi-cpha;` and `spi-cpol;` ensures the PMW3610’s required Mode 3 timing, fixing potential data misalignment.
+   - **CS Pin Moved**: Relocating `cs-gpios` to the trackball device node aligns with Zephyr bindings, ensuring proper chip select handling.
+   - **3-Wire SDIO**: Setting both MOSI and MISO to P0.24 matches the PMW3610’s bidirectional SDIO pin, correcting the previous 4-wire misconfiguration.
+   - **Typo Fix**: Changing `DIVIDOR` to `DIVIDER` ensures proper CPI scaling configuration.
+
+### Updated Configuration Review
+Based on your description, the revised files should look like this (confirm against your edits):
+
+- **charybdis_nano_right.conf**:
+  ```
+  CONFIG_SPI=y
+  CONFIG_INPUT=y
+  CONFIG_ZMK_POINTING=y
+  CONFIG_ZMK_EXT_POWER=y
+  CONFIG_PMW3610=y
+  CONFIG_PMW3610_CPI=1600
+  CONFIG_PMW3610_CPI_DIVIDER=4
+  CONFIG_PMW3610_SNIPE_CPI=200
+  CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+  CONFIG_PMW3610_SCROLL_TICK=60
+  CONFIG_PMW3610_SWAP_XY=y
+  CONFIG_PMW3610_INVERT_X=y
+  CONFIG_PMW3610_INVERT_Y=y
+  CONFIG_PMW3610_POLLING_RATE_125_SW=y
+  CONFIG_PMW3610_SMART_ALGORITHM=y
+  CONFIG_LOG=y
+  CONFIG_ZMK_LOG=y
+  CONFIG_LOG_DEFAULT_LEVEL=3
+  ```
+
+- **charybdis_nano_right.overlay** (updated SPI section):
+  ```
+  &spi0 {
+      status = "okay";
+      pinctrl-0 = <&spi0_default>;
+      pinctrl-1 = <&spi0_sleep>;
+      pinctrl-names = "default", "sleep";
+  };
+  &pinctrl {
+      spi0_default: spi0_default {
+          group1 {
+              psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                      <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                      <NRF_PSEL(SPIM_MISO, 0, 24)>;  // Both to P0.24 for SDIO
+          };
+      };
+      spi0_sleep: spi0_sleep {
+          group1 {
+              psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                      <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                      <NRF_PSEL(SPIM_MISO, 0, 24)>;
+              low-power-enable;
+          };
+      };
+  };
+  &spi0 {
+      trackball: trackball@0 {
+          status = "okay";
+          compatible = "pixart,pmw3610";
+          reg = <0>;
+          spi-max-frequency = <2000000>;
+          cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
+          irq-gpios = <&gpio0 26 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+          spi-cpha;
+          spi-cpol;
+          scroll-layers = <1>;
+          snipe-layers = <2>;
+      };
+  };
+  ```
+
+These changes should eliminate the build error and enable proper SPI communication, assuming the PCB wiring matches.
+
+### Next Steps
+Your testing plan is excellent—here’s the detailed process:
+
+1. **Push to GitHub**:
+   ```
+   cd ../fresh-fork
+   git add -A
+   git commit -m "Fix: Resolve Kconfig ZMK_LOG_LEVEL error + SPI Mode 3 configuration"
+   git push origin clean-trackball-fix
+   ```
+   - This triggers GitHub Actions. Monitor the build on the Actions tab of your `64key-3610-3` repo.
+
+2. **Check GitHub Actions**:
+   - Expect a green checkmark for a successful build. If it fails, expand the log for errors (e.g., DTS syntax, pin conflicts) and share the relevant lines.
+
+3. **Download and Flash**:
+   - Download the UF2 files for both halves from the Actions artifact.
+   - Flash each half: Double-tap reset on the Nice!Nano, drag the respective UF2 file.
+   - Note: The left half’s UF2 is included for completeness, but the trackball is on the right, so focus testing there.
+
+4. **Test Trackball Movement**:
+   - Roll the trackball in all directions and observe cursor behavior.
+   - **✅ If Trackball Moves but Tracks 45° Diagonal**:
+     - SPI communication is working! 🎉 The issue is the orientation transformation (SWAP_XY + INVERT_X + INVERT_Y isn’t precise for 45°). Implement the rotation matrix:
+       ```
+       int16_t temp_x = delta_x;
+       int16_t cos45 = 7071;  // 0.7071 * 10000
+       int16_t sin45 = 7071;  // 0.7071 * 10000
+       delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;
+       delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+       ```
+       - Add this in `pmw3610.c` (e.g., after delta reads in `pmw3610_sample_fetch`), commit, push, rebuild, and flash the right half.
+     - Test again—cursor should move straight up.
+   - **❌ If No Movement**:
+     - Check logs for PMW3610 probe errors (e.g., “SPI read failed”) or zero deltas.
+     - Verify PCB wiring (SCK=P0.22, SDIO=P0.24, CS=P0.20, IRQ=P0.26) against your hardware. Adjust pins if mismatched (e.g., check Aliexpress schematic).
+
+5. **Review Logs**:
+   - Connect a USB-to-serial adapter (P0.00/TX, P0.01/RX, GND at 115200 baud).
+   - Use a terminal (e.g., PuTTY) to view logs.
+   - Look for:
+     - `PMW3610: Initialized` (sensor startup).
+     - `PMW3610 deltas: x=X, y=Y` (delta changes with movement).
+   - If no logs, ensure `LOG_MODULE_REGISTER(pmw3610, CONFIG_LOG_DEFAULT_LEVEL);` is in `pmw3610.c`.
+
+### What to Expect
+- **Build Success**: The Kconfig fix should eliminate the `ZMK_LOG_LEVEL` error, and the SPI fixes should be validated.
+- **Trackball Behavior**: The SPI corrections should enable communication. If movement occurs but is diagonal, it’s a transformation issue; if no movement, it’s likely a wiring or driver issue.
+- **Next Steps**: Based on test results, we’ll refine the rotation or debug hardware.
+
+### Action Plan
+- Push the changes and monitor the build.
+- Flash, test, and review logs.
+- Report back with build status, movement behavior, or log output—I’ll guide the next tweak.
+
+You’ve addressed the critical issues—let’s get that trackball rolling straight! 🚀 (It’s 11:00 PM EDT on Sept 20, 2025—perfect timing to wrap this up tonight!)
