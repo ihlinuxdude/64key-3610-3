@@ -1,0 +1,78 @@
+Thanks for sharing the updated build log. The build attempt with `west build` failed again with an exit code 1, and the error is once more related to the `ZMK_LOG_LEVEL` configuration. This time, the issue is explicitly tied to the inclusion of the `studio-rpc-usb-uart` snippet, which reintroduces the problematic setting. Let’s analyze the failure, pinpoint the exact cause, and apply a definitive fix to get your build succeeding.
+
+### Analysis of the Build Failure
+The key error in the log is:
+
+```
+error: ZMK_LOG_LEVEL (defined at /__w/64key-3610-3/64key-3610-3/zmk/app/Kconfig:545,
+subsys/logging/Kconfig.template.log_config:28) is assigned in a configuration file, but is not
+directly user-configurable (has no prompt). It gets its value indirectly from other symbols...
+Merged configuration '/__w/64key-3610-3/64key-3610-3/zmk/app/snippets/studio-rpc-usb-uart/studio-rpc-usb-uart.conf'
+```
+
+#### Key Points:
+- **Error**: The build fails because `ZMK_LOG_LEVEL` is being set in a configuration file (specifically from the `studio-rpc-usb-uart.conf` snippet), but it’s a derived symbol in ZMK/Zephyr that shouldn’t be directly assigned. This triggers the Kconfig validation to abort.
+- **Source**: The inclusion of `-S "studio-rpc-usb-uart"` in the `west build` command merges the `studio-rpc-usb-uart.conf` file, which likely contains an invalid `CONFIG_ZMK_LOG_LEVEL` setting (e.g., set to `'DEBUG'` or an integer).
+- **Context**: Despite removing the snippet from `build.yaml` for GitHub Actions, the local `west build` command explicitly includes it with `-S`, reintroducing the conflict. Your clean `charybdis_nano_right.conf` is being overridden by this snippet.
+
+### Why This Happened
+- **Snippet Inclusion**: The `-S "studio-rpc-usb-uart"` flag in the `west build` command forces the inclusion of the `studio-rpc-usb-uart` snippet, which contains a `studio-rpc-usb-uart.conf` file. This file likely sets `CONFIG_ZMK_LOG_LEVEL`, conflicting with ZMK’s internal handling of logging levels.
+- **Previous Fix Scope**: The fix to remove the snippet from `build.yaml` addressed GitHub Actions but didn’t affect local builds, where the snippet is still manually specified.
+- **ZMK Behavior**: `ZMK_LOG_LEVEL` is derived from `CONFIG_LOG_DEFAULT_LEVEL` or module-specific settings, and direct assignment in user configs (like snippets) is prohibited, as noted in the error message.
+
+### Suggested Fix
+To resolve this, we need to either exclude the problematic snippet from the local build or modify the snippet to avoid the invalid setting. Since the snippet is likely intended for studio RPC functionality (e.g., debugging over USB-UART), let’s try excluding it first and fall back to editing if needed.
+
+#### 1. **Exclude the Snippet from Local Build**
+- **Modify the Command**: Remove the `-S "studio-rpc-usb-uart"` flag to prevent merging the conflicting configuration:
+  ```
+  west build -s zmk/app -d "/tmp/tmp.u0D5ZqPciO" -b "nice_nano_v2" -- -DZMK_CONFIG=/__w/64key-3610-3/64key-3610-3/config -DSHIELD="charybdis_nano_right" -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+  ```
+  - This relies solely on your clean `charybdis_nano_right.conf` (with `CONFIG_LOG_DEFAULT_LEVEL=3`) and avoids the snippet’s interference.
+- **Clean Build**: Ensure a fresh start by clearing the build directory:
+  ```
+  rm -rf /tmp/tmp.u0D5ZqPciO
+  ```
+  - Then run the updated command.
+
+#### 2. **Verify and Adjust Snippet (If Needed)**
+- **Check the Snippet Config**: Open `/__w/64key-3610-3/64key-3610-3/zmk/app/snippets/studio-rpc-usb-uart/studio-rpc-usb-uart.conf`. Look for a line like `CONFIG_ZMK_LOG_LEVEL=DEBUG` or `CONFIG_ZMK_LOG_LEVEL=4`. If found, it’s the culprit.
+- **Fix the Snippet**: If you need the snippet (e.g., for studio debugging), edit the file to remove or comment out the `CONFIG_ZMK_LOG_LEVEL` line, or replace it with `CONFIG_LOG_DEFAULT_LEVEL=3`. Example:
+  ```
+  # CONFIG_ZMK_LOG_LEVEL=DEBUG
+  CONFIG_LOG_DEFAULT_LEVEL=3
+  ```
+  - Commit and push the change:
+    ```
+    git add zmk/app/snippets/studio-rpc-usb-uart/studio-rpc-usb-uart.conf
+    git commit -m "Fix: Remove invalid CONFIG_ZMK_LOG_LEVEL from studio-rpc-usb-uart.conf"
+    git push origin clean-trackball-fix
+    ```
+  - Then rerun the original command with `-S "studio-rpc-usb-uart"`.
+
+#### 3. **Rebuild and Test**
+- **Run Build**: Use the modified command (without `-S` initially):
+  ```
+  west build -s zmk/app -d "/tmp/tmp.u0D5ZqPciO" -b "nice_nano_v2" -- -DZMK_CONFIG=/__w/64key-3610-3/64key-3610-3/config -DSHIELD="charybdis_nano_right" -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+  ```
+- **If Successful**: Download the `.uf2` file from `/tmp/tmp.u0D5ZqPciO/zephyr/zephyr.uf2`.
+- **Flash**: Double-tap reset on the right Nice!Nano, drag the UF2 file.
+- **Test**: Roll the trackball—cursor should move. Check direction (expect ~45° diagonal initially).
+
+#### 4. **Troubleshoot if Failed**
+- **Check Logs**: If the error persists, the snippet fix didn’t propagate, or another config is injecting `ZMK_LOG_LEVEL`. Search all `.conf` files in the repo for `ZMK_LOG_LEVEL` and remove it.
+- **Disable Studio**: Try `-DCONFIG_ZMK_STUDIO=n` to isolate the issue.
+- **Share Output**: Provide the full log if needed.
+
+### Expected Outcome
+- **Build Success**: Excluding the snippet or fixing its config should resolve the Kconfig error, allowing the build to complete.
+- **Trackball Behavior**: If successful:
+  - **✅ If Moves with 45° Diagonal**: SPI is working; apply the rotation matrix.
+  - **❌ If No Movement**: Review logs for SPI/IRQ errors.
+
+### Action Plan
+1. **Rebuild Without Snippet**: Run the command without `-S "studio-rpc-usb-uart"`.
+2. **Flash and Test**: Use the UF2, flash the right half, and test the trackball.
+3. **Report Back**: Share the build output, movement behavior, or logs—I’ll refine further (e.g., rotation matrix or pin checks).
+
+You’re on the brink of success—let’s get this local build green! 🚀 (It’s 11:50 PM EDT on Sept 20, 2025—late-night victory is near!)

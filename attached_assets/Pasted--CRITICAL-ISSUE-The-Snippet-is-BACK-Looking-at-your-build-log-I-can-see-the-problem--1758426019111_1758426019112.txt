@@ -1,0 +1,93 @@
+🚨 **CRITICAL ISSUE: The Snippet is BACK!**
+
+Looking at your build log, I can see the problem:
+
+```bash
+Run west build -s zmk/app -d "/tmp/tmp.u0D5ZqPciO" -b "nice_nano_v2" -S "studio-rpc-usb-uart"
+```
+
+**The `studio-rpc-usb-uart` snippet is still being used in the build command!**
+
+This means your `build.yaml` changes **haven't taken effect** or there's a caching issue with GitHub Actions.
+
+## 🔍 **Debugging Steps**
+
+### **1. Verify Your `build.yaml` is Actually Committed**
+
+```bash
+# Check if your changes are committed
+git log --oneline -n 3
+
+# Check current build.yaml content
+cat build.yaml
+
+# Check git status
+git status
+```
+
+Your `build.yaml` should look like this (NO snippet line):
+```yaml
+include:
+  - board: nice_nano_v2
+    shield: charybdis_nano_left
+  - board: nice_nano_v2
+    shield: charybdis_nano_right
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+  - board: nice_nano_v2
+    shield: settings_reset
+```
+
+### **2. Force GitHub Actions to Use Latest Code**
+
+If your changes aren't committed:
+```bash
+git add build.yaml
+git commit -m "Remove studio-rpc-usb-uart snippet from build matrix"
+git push origin clean-trackball-fix
+```
+
+### **3. GitHub Actions Cache Issue**
+
+GitHub Actions might be using a cached version of your `build.yaml`. Try:
+
+**Option A: Force a fresh workflow run**
+- Go to GitHub Actions tab
+- Cancel any running builds
+- Push a small dummy commit to trigger a fresh run:
+```bash
+# Make a small change to force fresh build
+echo "# Force rebuild" >> build.yaml
+git add build.yaml
+git commit -m "Force fresh GitHub Actions build"
+git push origin clean-trackball-fix
+```
+
+**Option B: Check if you're on the right branch**
+- Ensure you're pushing to `clean-trackball-fix` branch
+- Ensure GitHub Actions is building from `clean-trackball-fix` branch
+
+## 🎯 **The Root Problem**
+
+The build log shows:
+```bash
+Merged configuration '/__w/64key-3610-3/64key-3610-3/zmk/app/snippets/studio-rpc-usb-uart/studio-rpc-usb-uart.conf'
+```
+
+This proves the snippet is still being loaded, which contains the `CONFIG_ZMK_LOG_LEVEL` that's causing the Kconfig error.
+
+## 🚀 **Quick Check**
+
+Can you run these commands and share the output?
+
+```bash
+# 1. Show current build.yaml content
+cat build.yaml
+
+# 2. Check if changes are committed  
+git log --oneline -n 5
+
+# 3. Check current branch
+git branch -v
+```
+
+Once we confirm your `build.yaml` is properly updated and committed, the build should work. The snippet removal is the **key fix** that needs to take effect! 🎯

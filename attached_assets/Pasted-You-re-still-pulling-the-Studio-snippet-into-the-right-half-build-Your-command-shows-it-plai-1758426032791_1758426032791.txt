@@ -1,0 +1,84 @@
+You’re still pulling the **Studio snippet** into the right-half build.
+
+Your command shows it plainly:
+
+```
+west build ...  -S studio-rpc-usb-uart  ...
+...
+Merged configuration .../snippets/studio-rpc-usb-uart/studio-rpc-usb-uart.conf
+error: ZMK_LOG_LEVEL is assigned ...
+```
+
+That snippet **assigns `CONFIG_ZMK_LOG_LEVEL`**, which is a derived symbol → Kconfig hard-fails.
+
+## Fix it (do exactly this)
+
+### A) Stop passing the snippet on the command line
+
+Remove `-S studio-rpc-usb-uart` and **also** any `-DSNIPPET=studio-rpc-usb-uart`.
+
+Correct manual build:
+
+```bash
+west build -s zmk/app -b nice_nano_v2 \
+  -- -DZMK_CONFIG=$PWD/config -DSHIELD=charybdis_nano_right \
+     -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+```
+
+### B) Remove it from your GitHub Actions workflow
+
+In `.github/workflows/build.yml`, your “Build (… )” step likely does something like:
+
+```yaml
+run: |
+  west build -s zmk/app -d $BUILD_DIR -b ${{ matrix.board }} \
+    -S ${{ matrix.snippet }} \
+    -- -DZMK_CONFIG=${{ github.workspace }}/config \
+       -DSHIELD=${{ matrix.shield }} \
+       -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n \
+       -DSNIPPET=${{ matrix.snippet }}
+```
+
+Change it to **conditionally** pass the snippet only when you actually want it (e.g., left half), or just remove it entirely for now:
+
+```yaml
+run: |
+  SNIPPET_FLAG=""
+  EXTRA_CMAKE=""
+  if [ -n "${{ matrix.snippet }}" ]; then
+    SNIPPET_FLAG="-S ${{ matrix.snippet }}"
+    EXTRA_CMAKE="-DSNIPPET=${{ matrix.snippet }}"
+  fi
+
+  west build -s zmk/app -d $BUILD_DIR -b ${{ matrix.board }} \
+    $SNIPPET_FLAG \
+    -- -DZMK_CONFIG=${{ github.workspace }}/config \
+       -DSHIELD=${{ matrix.shield }} \
+       -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n \
+       $EXTRA_CMAKE
+```
+
+Or simplest: **remove** the `snippet:` field from the right-half matrix entry in your root `build.yaml`/matrix generator and delete any unconditional `-S` or `-DSNIPPET` in the workflow.
+
+### C) Double-check no one else sets it
+
+Run:
+
+```bash
+git grep -n "ZMK_LOG_LEVEL"
+git grep -n "studio-rpc-usb-uart"
+```
+
+You should see **no** `ZMK_LOG_LEVEL` assignments in your config and **no** snippet used for the right half.
+
+---
+
+## After the build goes green
+
+* Your PMW3610 DTS should keep **Mode 3** and **`cs-gpios` on the device node** (that part looked fine).
+* Flash the **right** half and test:
+
+  * If motion exists but feels \~**45°** off → wire in your **rotate input-processor** and set `angle-deg = <45>` (tune ±5°).
+  * If probe errors/no motion → share the first PMW3610 init logs and we’ll nail wiring/IRQ next.
+
+*(The “unknown vendor prefix ‘pixart’” line is just a warning; safe to ignore.)*
