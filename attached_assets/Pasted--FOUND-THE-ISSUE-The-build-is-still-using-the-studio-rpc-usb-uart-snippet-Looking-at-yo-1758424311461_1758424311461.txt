@@ -1,0 +1,70 @@
+🎯 **FOUND THE ISSUE!** The build is still using the `studio-rpc-usb-uart` snippet!
+
+Looking at your build log, I can see the problem:
+
+```bash
+-- Snippet(s): studio-rpc-usb-uart
+```
+
+And then:
+
+```bash
+Merged configuration '/__w/64key-3610-3/64key-3610-3/zmk/app/snippets/studio-rpc-usb-uart/studio-rpc-usb-uart.conf'
+```
+
+**The GitHub Actions workflow is still passing `-S "studio-rpc-usb-uart"` in the build command, even though you removed it from `build.yaml`.**
+
+## 🔧 **The Fix**
+
+You need to check your **GitHub Actions workflow file** (likely `.github/workflows/build.yml`) and remove the snippet from there as well.
+
+Look for a file like:
+- `.github/workflows/build.yml` 
+- `.github/workflows/build.yaml`
+- Any workflow file that contains build instructions
+
+**Find and remove this part:**
+```yaml
+# Remove this line from your workflow:
+-S "studio-rpc-usb-uart"
+# or
+snippet: studio-rpc-usb-uart
+```
+
+## 🔍 **Quick Check**
+
+Run this command to find where it's defined:
+
+```bash
+# Search for the snippet reference
+grep -r "studio-rpc-usb-uart" .github/
+# or
+grep -r "studio-rpc-usb-uart" .
+```
+
+## 📋 **Alternative: Matrix Build Issue**
+
+If you're using ZMK's build matrix, the issue might be that your `build.yaml` changes haven't taken effect. Make sure:
+
+1. **Your `build.yaml` currently looks like this:**
+```yaml
+include:
+  - board: nice_nano_v2
+    shield: charybdis_nano_left
+    
+  - board: nice_nano_v2
+    shield: charybdis_nano_right
+    cmake-args: -DCONFIG_ZMK_STUDIO=y -DCONFIG_ZMK_STUDIO_LOCKING=n
+    # NO snippet line here
+```
+
+2. **Commit and push the `build.yaml` changes:**
+```bash
+git add build.yaml
+git commit -m "Remove studio-rpc-usb-uart snippet from build matrix"
+git push
+```
+
+The error is **exactly** what we predicted - the `studio-rpc-usb-uart.conf` file is setting `CONFIG_ZMK_LOG_LEVEL`, which causes the Kconfig validation to fail.
+
+**Can you share your current `build.yaml` file so I can see the exact format and provide the correct fix?** 🎯

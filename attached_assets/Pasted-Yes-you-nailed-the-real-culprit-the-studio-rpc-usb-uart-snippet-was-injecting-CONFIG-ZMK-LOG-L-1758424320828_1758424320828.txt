@@ -1,0 +1,128 @@
+Yes — you nailed the real culprit: the `studio-rpc-usb-uart` snippet was injecting `CONFIG_ZMK_LOG_LEVEL` and blowing up Kconfig. Remove that snippet and you’ll finally get past Kconfig so we can test the PMW3610 + rotation.
+
+Here’s a tidy, working baseline to push right now.
+
+---
+
+## 1) `build.yaml` (right half)
+
+Remove the snippet; keep Studio via CMake args:
+
+```diff
+-  - board: nice_nano_v2
+-    shield: charybdis_nano_right
+-    snippet: studio-rpc-usb-uart
+-    cmake-args: >
+-      -DCONFIG_ZMK_STUDIO=y
+-      -DCONFIG_ZMK_STUDIO_LOCKING=n
+-      -DZMK_EXTRA_MODULES=$GITHUB_WORKSPACE/modules/pointer-rotate
++  - board: nice_nano_v2
++    shield: charybdis_nano_right
++    cmake-args: >
++      -DCONFIG_ZMK_STUDIO=y
++      -DCONFIG_ZMK_STUDIO_LOCKING=n
++      -DZMK_EXTRA_MODULES=$GITHUB_WORKSPACE/modules/pointer-rotate
+```
+
+---
+
+## 2) `charybdis_nano_right.conf` (clean, compilable)
+
+```conf
+CONFIG_SPI=y
+CONFIG_INPUT=y
+CONFIG_ZMK_POINTING=y
+CONFIG_ZMK_EXT_POWER=y
+
+# Logging (don’t set ZMK_LOG_LEVEL directly)
+CONFIG_LOG=y
+CONFIG_ZMK_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# PMW3610
+CONFIG_PMW3610=y
+CONFIG_PMW3610_CPI=1600
+CONFIG_PMW3610_CPI_DIVIDER=4
+CONFIG_PMW3610_SNIPE_CPI=200
+CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+CONFIG_PMW3610_SCROLL_TICK=60
+
+# Only handles 0/90/180/270 (keep for sanity)
+CONFIG_PMW3610_SWAP_XY=y
+CONFIG_PMW3610_INVERT_X=y
+CONFIG_PMW3610_INVERT_Y=y
+```
+
+---
+
+## 3) `charybdis_nano_right.overlay` (SPI mode + CS on device)
+
+```dts
+&spi0 {
+    status = "okay";
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    trackball: pmw3610@0 {
+        status = "okay";
+        compatible = "pixart,pmw3610";
+        reg = <0>;
+        spi-max-frequency = <2000000>;
+
+        /* PixArt needs SPI Mode 3 */
+        spi-cpha;
+        spi-cpol;
+
+        cs-gpios  = <&gpio0 20 GPIO_ACTIVE_LOW>;
+        irq-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>;
+
+        scroll-layers = <1>;
+        snipe-layers  = <2>;
+    };
+};
+```
+
+Keep your `pinctrl` groups (SCK=P0.22, MOSI=P0.24, MISO=P0.17). Only use 3-wire if your PCB is *actually* wired for SDIO; otherwise keep 4-wire as above.
+
+---
+
+## 4) Rotate by \~45° (processor wiring)
+
+Make sure your rotate module exists (`modules/pointer-rotate/…` with `zephyr/module.yml` + `CMakeLists.txt` + `src/pointer_rotate.c` + binding). Then define the node and attach it:
+
+```dts
+/ {
+    pointer_rotate0: pointer_rotate_0 {
+        compatible = "zmk,pointer-rotate";
+        angle-deg = <45>;   /* tune ±5 later */
+    };
+};
+
+&trackball_listener {
+    /* If you also use swap/invert, keep them BEFORE rotate */
+    processors = <&pointer_rotate0>;
+};
+```
+
+(If your listener label differs, use that label. Earlier logs showed `&trackball_listener`.)
+
+---
+
+## 5) What to expect after flashing the right half
+
+* **Boot log** (via ZMK Studio) should show PMW3610 probe OK (no -EIO/-ENODEV).
+* Swipe **straight up**:
+
+  * If still diagonal: rotation module is working; nudge `angle-deg` (40–50°) to taste.
+  * If no motion or probe errors: recheck pins and that `spi-cpha; spi-cpol;` are present and **CS is on the device node**.
+
+---
+
+## Quick smoke tests & tips
+
+* Turn on one build at `CONFIG_LOG_DEFAULT_LEVEL=4` just to see init messages if needed.
+* Verify no file sets `CONFIG_ZMK_LOG_LEVEL` (the snippet was the only source).
+* Nice!Nano **v2** is **nRF52840** (not 52832). Double-check your chosen pins are actually free on your PCB header for v2.
+
+Push these changes; the right-half job should compile now. Flash it and tell me how the cursor moves — if it’s just the \~45° cant, we’ll finalize the angle and you’re done.
