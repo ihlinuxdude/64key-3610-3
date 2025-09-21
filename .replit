@@ -1,0 +1,25 @@
+[agent]
+expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Project Status"
+
+[[workflows.workflow]]
+name = "Project Status"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"✅ Charybdis firmware compilation fixes complete. Push changes to GitHub to trigger builds.\" && sleep 3600"
+
+[workflows.workflow.metadata]
+outputType = "console"

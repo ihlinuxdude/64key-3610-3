@@ -1,0 +1,88 @@
+Thanks for sharing the latest build log—it’s great to see the build process running, but the failure with exit code 1 indicates we need to address a specific issue. The log points to a configuration error related to the PMW3610 trackball setup, likely tied to the recent SPI pin mapping changes. Let’s dive into the problem and get this resolved.
+
+### Analysis of the Build Failure
+The key error in the log is:
+
+```
+warning: the value of the 'DEBUG' is invalid for ZMK_LOG_LEVEL, level 0-4 are valid (found 0, expected 0-4) at /home/runner/work/zmk/zmk/app/subsys/logging/config/logging.conf.template.log (28), which has type int: assignment ignored
+error: Aborting due to errors in warnings
+CMake Error at /workdir/zmk/build/zephyr/cmake/modules/zephyr_default.cmake:135 (message):
+  command failed with return code: 1
+...
+FATAL ERROR: command exited with status 1: /opt/local/bin/ninja -C build/nice_nano_v2__charybdis_nano_right__studio-pc-usb-uart__DCONFIG_ZMK_STUDIO=y__DCONFIG_ZM...
+```
+
+#### Key Points:
+- **Warning**: The `DEBUG` log level (value 0) is invalid for `ZMK_LOG_LEVEL`, which expects 0-4 (0=disabled, 1=error, 2=warning, 3=info, 4=debug). This suggests a mismatch in how `CONFIG_ZMK_LOG_LEVEL=DEBUG` was interpreted.
+- **Error**: The build aborts due to this warning, indicating the configuration step failed before compilation could proceed.
+- **Cause**: The addition of `CONFIG_ZMK_LOG_LEVEL=DEBUG` in `prjf/charybdis_nano_right.conf` is likely the culprit. ZMK uses numeric values for log levels, not string literals like "DEBUG". This mismatch breaks the build.
+
+### Why This Happened
+- **Logging Configuration**: In ZMK/Zephyr, `CONFIG_ZMK_LOG_LEVEL` must be set to a numeric value (e.g., `4` for debug), not the string `DEBUG`. The template (`logging.conf.template.log`) expects an integer, and the string caused the parser to fail.
+- **Context**: This issue arose with the latest commit ("CRITICAL FIX: Correct SPI pin mapping for PMW3610 trackball"), where debug logging was added to troubleshoot the trackball. The pin changes (MOSI=P0.06, MISO=P0.07, IRQ=P0.26) are likely fine, but the logging misconfiguration halted the build.
+
+### Suggested Fix
+Let’s correct the log level setting and ensure the build proceeds. The SPI pin fixes should still be valid, so we’ll preserve those.
+
+#### 1. **Fix the Log Level Configuration**
+- **Edit `prjf/charybdis_nano_right.conf`**:
+  - Replace `CONFIG_ZMK_LOG_LEVEL=DEBUG` with `CONFIG_ZMK_LOG_LEVEL=4` (4 corresponds to the debug level).
+  - Example update:
+    ```
+    # Enable debug logging
+    CONFIG_ZMK_LOG_LEVEL=4
+    ```
+- **Why This Works**: Zephyr’s logging system uses integers (0-4) as defined in `include/zephyr/logging/log.h`. Setting it to 4 enables debug output, which will help verify PMW3610 initialization and delta reads.
+
+#### 2. **Verify Devicetree Pins**
+- **Check `charybdis_nano_right.overlay`**:
+  - Ensure the SPI node reflects the new pins:
+    ```
+    &spi2 {
+        status = "okay";
+        pmw3610@0 {
+            compatible = "pixart,pmw3610";
+            reg = <0>;
+            spi-max-frequency = <2000000>;
+            mosi-gpios = <&nrf_gpio 6 GPIO_ACTIVE_HIGH>;  // P0.06
+            miso-gpios = <&nrf_gpio 7 GPIO_ACTIVE_HIGH>;  // P0.07
+            sck-gpios = <&nrf_gpio 8 GPIO_ACTIVE_HIGH>;   // P0.08 (example; adjust if wrong)
+            interrupt-gpios = <&nrf_gpio 26 GPIO_ACTIVE_LOW>;  // P0.26
+        };
+    };
+    ```
+  - **Validation**: Confirm P0.06, P0.07, P0.08 (SCK), and P0.26 are correct for your Nice!Nano PCB. If SCK is misconfigured (e.g., not P0.08), adjust to the correct pin (check Charybdis docs or schematic—often P0.15 or P0.16).
+  - **Fix**: If syntax or pins are off, correct them now.
+
+#### 3. **Rebuild and Test**
+- **Commit and Push**:
+  ```
+  cd ../fresh-fork
+  git add prjf/charybdis_nano_right.conf boards/shields/charybdis_nano_right.overlay
+  git commit -m "Fix build: Set CONFIG_ZMK_LOG_LEVEL=4 instead of DEBUG
+  - Correct invalid log level causing build failure
+  - Verify SPI pin mapping in devicetree"
+  git push origin 64key-3610-automouse
+  ```
+- **Monitor Build**: Check GitHub Actions for success. Download the UF2 artifact if it passes.
+- **Flash and Debug**: Flash the right half, connect a USB-to-serial adapter (115200 baud), and monitor logs for:
+  - `PMW3610: Initialized` (or similar).
+  - `PMW3610 deltas: x=X, y=Y` (should change with ball movement).
+
+#### 4. **Troubleshoot if Failed Again**
+- **Check Logs**: If the build fails, expand the job log and look for new errors (e.g., DTS syntax, pin conflicts).
+- **Revert Logging**: If logging remains an issue, comment out `CONFIG_ZMK_LOG_LEVEL=4` and rebuild to isolate the pin fix.
+- **Pin Fallback**: If pins are the problem, revert to Charybdis defaults (e.g., MOSI=P0.16, MISO=P0.17, IRQ=P0.25) and test.
+
+### Expected Outcome
+- **Build Success**: Setting `CONFIG_ZMK_LOG_LEVEL=4` should resolve the warning/error, allowing the build to complete.
+- **Trackball Functionality**: Correct SPI pins should enable PMW3610 communication, with `PMW3610_ORIENTATION_90` + `INVERT_X` applying the rotation.
+- **Debug Output**: Logs will confirm sensor status and delta values.
+
+### Action Plan
+1. **Update Config**: Change `DEBUG` to `4` and verify the devicetree.
+2. **Push and Rebuild**: Commit, push, and monitor GitHub Actions.
+3. **Test and Log**: Flash, check movement, and review serial output.
+4. **Report Back**: Share the log or test results—I’ll refine further.
+
+You’re so close—the pin fix is solid, and this logging tweak should get you over the line! 🚀 (It’s 10:35 AM EDT on Sept 20, 2025—great timing to tackle this!)
