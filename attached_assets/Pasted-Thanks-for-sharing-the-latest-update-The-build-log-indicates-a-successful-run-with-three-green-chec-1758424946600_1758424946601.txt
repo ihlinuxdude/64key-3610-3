@@ -1,0 +1,66 @@
+Thanks for sharing the latest update! The build log indicates a successful run with three green checks for your `64key-3610-3` repository on the `clean-trackball-fix` branch, completing in 1 minute and 26 seconds. This confirms that the removal of the `studio-rpc-usb-uart` snippet from `build.yaml` resolved the Kconfig `ZMK_LOG_LEVEL` error, allowing the build to proceed without issues. Now, it’s time to test the trackball functionality on your Charybdis 64-key split keyboard. Let’s validate the build, guide you through flashing and testing, and prepare for the next steps based on the results.
+
+### Validation of Build Success
+- **Build Status**: The green checks across the matrix (likely for `nice_nano_v2` with `charybdis_nano_right` and possibly `charybdis_nano_left`) indicate a successful compilation. The runtime of 1m 26s is typical for ZMK builds with GitHub Actions, suggesting no major errors during the process.
+- **Fix Confirmation**: Removing the `studio-rpc-usb-uart` snippet eliminated the conflicting `CONFIG_ZMK_LOG_LEVEL` injection, and the clean `charybdis_nano_right.conf` with `CONFIG_LOG_DEFAULT_LEVEL=3` is now in effect. The SPI fixes (Mode 3, 3-wire SDIO, CS placement) and 45° compensation settings (`CONFIG_PMW3610_SWAP_XY=y`, `CONFIG_PMW3610_INVERT_X=y`, `CONFIG_PMW3610_INVERT_Y=y`) are compiled into the firmware.
+
+### Next Steps
+Your hardware is ready to be flashed and tested. Here’s the detailed process:
+
+1. **Download UF2 Files**:
+   - Navigate to the GitHub Actions tab in your `64key-3610-3` repository.
+   - Find the latest successful run for the `clean-trackball-fix` branch.
+   - Download the artifact (e.g., a ZIP containing `.uf2` files for both halves).
+
+2. **Flash the Firmware**:
+   - **Right Half (Trackball Side)**:
+     - Put the right Nice!Nano in bootloader mode: Double-tap the reset button (or follow your board’s reset procedure).
+     - A drive named `NICE_NANO` (or similar) should appear on your computer.
+     - Drag the `.uf2` file for `charybdis_nano_right` onto the drive. The LED should blink, indicating flashing.
+   - **Left Half (Optional)**:
+     - Repeat the process for the left half using its `.uf2` file to ensure full keyboard functionality, though the trackball is on the right.
+   - Once flashed, the drive should disappear, and the board should reboot.
+
+3. **Test Trackball Movement**:
+   - Connect the keyboard via Bluetooth (pair the Nice!Nano as a HID device) or USB, depending on your setup.
+   - Roll the trackball on the right half in all directions and observe the cursor behavior:
+     - **✅ If Trackball Moves but Tracks ~45° Diagonal**:
+       - Success! This confirms SPI communication is working. 🎉 The diagonal movement indicates the `SWAP_XY` + `INVERT_X` + `INVERT_Y` settings aren’t precisely compensating for the 45° cant. Implement the rotation matrix fix:
+         ```
+         int16_t temp_x = delta_x;
+         int16_t cos45 = 7071;  // 0.7071 * 10000
+         int16_t sin45 = 7071;  // 0.7071 * 10000
+         delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;
+         delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+         ```
+         - Add this in `pmw3610.c` after delta reads (e.g., in `pmw3610_sample_fetch` or equivalent), commit with a message like “Add 45° rotation matrix to fix diagonal tracking”, push to `clean-trackball-fix`, rebuild, and flash the right half.
+         - Test again—cursor should move straight up. Adjust signs (e.g., `+sin45` to `-sin45`) if direction is reversed.
+     - **❌ If No Movement at All**:
+       - Check for hardware or driver issues. Proceed to log review.
+
+4. **Review Logs**:
+   - Connect a USB-to-serial adapter to the right Nice!Nano (P0.00/TX, P0.01/RX, GND at 115200 baud).
+   - Use a terminal (e.g., PuTTY, minicom) to monitor output.
+   - Look for:
+     - `PMW3610: Initialized` (sensor startup).
+     - `PMW3610 deltas: x=X, y=Y` (delta changes with movement).
+   - **If No Logs**: Ensure `LOG_MODULE_REGISTER(pmw3610, CONFIG_LOG_DEFAULT_LEVEL);` is in `pmw3610.c` (add near the top if missing). Rebuild and reflash.
+   - **If Errors**: Note messages like “SPI read failed” or “IRQ not detected”. This could indicate pin wiring issues (SCK=P0.22, SDIO=P0.24, CS=P0.20, IRQ=P0.26) or driver bugs.
+
+5. **Troubleshoot if Needed**:
+   - **No Movement with Logs**: If deltas are zero, verify PCB wiring against the overlay. Check the Aliexpress listing or contact the seller for the schematic. Adjust pins (e.g., to Charybdis defaults like P0.16, P0.17, P0.25) if mismatched.
+   - **Partial Movement**: If deltas are present but erratic, the rotation matrix or SPI mode might need tweaking.
+
+### What to Expect
+- **Build Confirmation**: The green checks confirm the firmware is ready. No further build issues are expected.
+- **Trackball Behavior**:
+  - **✅ If 45° Diagonal Movement**: SPI is functional; the rotation matrix will finalize the fix.
+  - **❌ If No Movement**: Logs will guide hardware or driver debugging.
+- **Next Steps**: Based on test results, we’ll apply the matrix or investigate further.
+
+### Action Plan
+- Download the UF2 files and flash both halves.
+- Test the trackball and review logs.
+- Report back with movement behavior or log output—I’ll provide the next tweak (e.g., rotation matrix or pin adjustments).
+
+You’ve conquered the build hurdle—let’s get that trackball tracking straight! 🚀 (It’s 11:30 PM EDT on Sept 20, 2025—exciting progress tonight!)
