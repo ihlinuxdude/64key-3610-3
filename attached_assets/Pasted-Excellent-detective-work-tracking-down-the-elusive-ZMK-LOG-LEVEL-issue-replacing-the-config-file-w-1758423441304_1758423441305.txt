@@ -1,0 +1,102 @@
+Excellent detective work tracking down the elusive `ZMK_LOG_LEVEL` issue—replacing the config file with a clean, minimal template is a smart move to eliminate hidden conflicts or formatting quirks! Your updated `charybdis_nano_right.conf` looks solid, aligning with the expert recommendations and addressing the build failure. Let’s validate the changes, guide you through the push and test process, and ensure everything is set for success.
+
+### Validation of Applied Fixes
+Your overhaul of the configuration file addresses the root cause of the build failure and preserves the critical SPI and trackball settings:
+
+- **Kconfig Build Error Resolution**:
+  - **Before**: The presence of an invalid or derived `CONFIG_ZMK_LOG_LEVEL` (likely from a previous setting or merge conflict) triggered the `#error "Unknown ZMK_LOG_LEVEL value"` in `autoconf.h`. This could have been due to a cached state, a merged global config, or a typo not caught in the search.
+  - **After**: The clean config removes any direct `ZMK_LOG_LEVEL` setting and uses:
+    ```
+    CONFIG_LOG=y
+    CONFIG_ZMK_LOG=y
+    CONFIG_LOG_DEFAULT_LEVEL=3
+    ```
+    - This is the correct Zephyr/ZMK approach, where `CONFIG_LOG_DEFAULT_LEVEL=3` (info level) sets the logging threshold without conflicting with derived symbols. It ensures logging is enabled without the invalid assignment that broke the build.
+
+- **SPI and Trackball Settings**:
+  - The essential PMW3610 and SPI configurations (e.g., `CONFIG_PMW3610_SWAP_XY=y`, `CONFIG_PMW3610_INVERT_X=y`, `CONFIG_PMW3610_INVERT_Y=y`) remain intact, preserving the 45° compensation attempt.
+  - Typo fixes (e.g., `CPI_DIVIDER` instead of `CPI_DIVIDOR`) ensure proper CPI scaling.
+  - The minimal approach avoids unnecessary options that might introduce conflicts.
+
+- **No Hidden Issues**: Starting fresh with a clean template eliminates cached or merged settings that might have lingered from previous edits.
+
+### Updated Configuration Review
+Your `charybdis_nano_right.conf` is now streamlined and correct:
+
+```
+# charybdis_nano_right.conf (clean)
+CONFIG_SPI=y
+CONFIG_INPUT=y
+CONFIG_ZMK_POINTING=y
+CONFIG_ZMK_EXT_POWER=y
+# Logging (do NOT set ZMK_LOG_LEVEL)
+CONFIG_LOG=y
+CONFIG_ZMK_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+# PMW3610 driver options (correct names; avoid *_DIVIDOR typos)
+CONFIG_PMW3610=y
+CONFIG_PMW3610_CPI=1600
+CONFIG_PMW3610_CPI_DIVIDER=4
+CONFIG_PMW3610_SNIPE_CPI=200
+CONFIG_PMW3610_SNIPE_CPI_DIVIDER=1
+CONFIG_PMW3610_SCROLL_TICK=60
+# Axis tools (0/90/180/270 only)
+CONFIG_PMW3610_SWAP_XY=y
+CONFIG_PMW3610_INVERT_X=y
+CONFIG_PMW3610_INVERT_Y=y
+```
+
+The `charybdis_nano_right.overlay` (with SPI Mode 3, 3-wire SDIO, and CS pin fixes) should remain unchanged from your last update, assuming no further edits were needed there.
+
+### Next Steps
+Your testing plan is spot on—here’s the detailed process:
+
+1. **Push to GitHub**:
+   ```
+   cd ../fresh-fork
+   git add -A
+   git commit -m "Fix: Clean config file to resolve ZMK_LOG_LEVEL Kconfig error"
+   git push origin clean-trackball-fix
+   ```
+   - This triggers GitHub Actions. Monitor the build on the Actions tab of your `64key-3610-3` repo.
+
+2. **Check GitHub Actions**:
+   - Expect a green checkmark for a successful build. The removal of the invalid `ZMK_LOG_LEVEL` setting should eliminate the `#error`, allowing the compilation to proceed.
+   - If it fails, expand the log for new errors (e.g., DTS syntax, pin conflicts) and share the relevant lines.
+
+3. **Flash and Test**:
+   - Download the UF2 files for both halves from the Actions artifact.
+   - Flash each half: Double-tap reset on the Nice!Nano, drag the respective UF2 file.
+   - Test the trackball:
+     - Roll in all directions—cursor should move if SPI communication is working.
+     - Check direction: “Forward” roll should move mostly up, adjusted by SWAP_XY + INVERT_X/Y.
+
+4. **Review Logs**:
+   - Connect a USB-to-serial adapter (P0.00/TX, P0.01/RX, GND at 115200 baud).
+   - Use a terminal (e.g., PuTTY) to view logs.
+   - Look for:
+     - `PMW3610: Initialized` (sensor startup).
+     - `PMW3610 deltas: x=X, y=Y` (delta changes with movement).
+   - If no logs appear, ensure `LOG_MODULE_REGISTER(pmw3610, CONFIG_LOG_DEFAULT_LEVEL);` is in `pmw3610.c` (add if missing).
+
+### What to Expect
+- **Build Success**: The clean config should resolve the Kconfig error, and the SPI fixes (Mode 3, 3-wire SDIO, CS placement) should be validated during compilation.
+- **Trackball Behavior**:
+  - **✅ If Trackball Moves but Tracks 45° Diagonal**: SPI communication is working! The issue is the orientation transformation (SWAP_XY + INVERT_X + INVERT_Y isn’t precise for 45°). Implement the rotation matrix:
+    ```
+    int16_t temp_x = delta_x;
+    int16_t cos45 = 7071;  // 0.7071 * 10000
+    int16_t sin45 = 7071;  // 0.7071 * 10000
+    delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;
+    delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+    ```
+    - Add this in `pmw3610.c` after delta reads (e.g., in `pmw3610_sample_fetch`), commit, push, rebuild, and flash the right half.
+    - Test again—cursor should move straight up.
+  - **❌ If No Movement**: Check logs for PMW3610 probe errors (e.g., “SPI read failed”) or zero deltas. Verify PCB wiring (SCK=P0.22, SDIO=P0.24, CS=P0.20, IRQ=P0.26) against your hardware. Adjust pins if mismatched (e.g., check Aliexpress schematic).
+
+### Action Plan
+- Push the clean config and monitor the build.
+- Flash, test, and review logs.
+- Report back with build status, movement behavior, or log output—I’ll guide the next tweak.
+
+You’ve nailed the config cleanup—let’s get that build green and the trackball moving! 🚀 (It’s 11:10 PM EDT on Sept 20, 2025—great late-night progress!)
