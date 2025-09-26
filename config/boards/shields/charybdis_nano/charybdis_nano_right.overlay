@@ -62,15 +62,11 @@
         x-input-code = <INPUT_REL_X>;
         y-input-code = <INPUT_REL_Y>;
         
-        // Custom rotation for 45° canted trackball
-        // Testing if ihlinuxdude fork supports these properties:
-        rotation-deg = <45>;
-        rotate-clockwise;
-        
-        // Badjeff standard axis properties (fallback orthogonal)
-        // swap-xy;         // Uncomment if needed
-        // invert-x;        // Uncomment if needed  
-        // invert-y;        // Uncomment if needed
+        // Axis transformation for 45° canted trackball
+        // This fork supports these device tree properties:
+        swap-xy;         // Swap X and Y axes (90° rotation)
+        invert-x;        // Invert X axis direction  
+        // invert-y;        // Uncomment if needed for fine-tuning
         
         // ZMK layer configuration
         scroll-layers = <1>;
