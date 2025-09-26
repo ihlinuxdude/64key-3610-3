@@ -10,14 +10,14 @@ Preferred communication style: Simple, everyday language.
 
 ## Recent Changes
 
-**September 26, 2025**: Completed comprehensive PMW3610 trackball firmware migration and fixes:
+**September 26, 2025**: Completed comprehensive PMW3610 trackball firmware with proven 45° rotation fix:
 - **Driver Migration**: Switched to ihlinuxdude/zmk-pmw3610-driver64key fork optimized for canted trackballs
 - **Configuration Consolidation**: Moved all systematic fixes from ignored 64key-3610-3/ directory to root level where GitHub Actions actually reads them
 - **SPI Fixes**: Corrected electrical issues (MISO=P0.17, MOSI=P0.24), implemented SPI Mode 3, proper pin assignments
 - **Build System**: Removed problematic studio-rpc-usb-uart snippet, clean logging without CONFIG_ZMK_LOG_LEVEL conflicts
-- **Axis Transformation**: Configured swap-xy; and invert-x; device tree properties for 45° canted trackball
+- **45° Rotation Fix**: Integrated badjeff/zmk-input-behavior-listener module with rotate-deg=315 (proven community solution)
 - **Power Management**: Applied 1000ms power-up delay for Nice!Nano v2 stability
-- **Status**: All systematic fixes architect-approved and ready for GitHub Actions testing
+- **Status**: All fixes architect-approved, using human-tested rotation code, ready for GitHub Actions testing
 
 ## System Architecture
 
