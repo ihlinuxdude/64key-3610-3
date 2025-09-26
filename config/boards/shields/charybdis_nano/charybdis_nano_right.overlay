@@ -62,13 +62,23 @@
         x-input-code = <INPUT_REL_X>;
         y-input-code = <INPUT_REL_Y>;
         
+        // Custom rotation for 45° canted trackball
+        // Check if ihlinuxdude fork supports these properties:
+        // rotation-deg = <45>;
+        // rotate-clockwise;
+        
+        // Badjeff standard axis properties (fallback orthogonal)
+        // swap-xy;         // Uncomment if needed
+        // invert-x;        // Uncomment if needed  
+        // invert-y;        // Uncomment if needed
+        
         // ZMK layer configuration
         scroll-layers = <1>;
         snipe-layers = <2>;
         // automouse-layer = <3>;
         
-        // Power management (force sensor awake for stable operation)
-        // force-awake;
+        // Power management
+        force-awake;
     };
 };
 
