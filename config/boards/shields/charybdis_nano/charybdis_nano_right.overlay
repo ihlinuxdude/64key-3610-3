@@ -63,9 +63,9 @@
         y-input-code = <INPUT_REL_Y>;
         
         // Custom rotation for 45° canted trackball
-        // Check if ihlinuxdude fork supports these properties:
-        // rotation-deg = <45>;
-        // rotate-clockwise;
+        // Testing if ihlinuxdude fork supports these properties:
+        rotation-deg = <45>;
+        rotate-clockwise;
         
         // Badjeff standard axis properties (fallback orthogonal)
         // swap-xy;         // Uncomment if needed
