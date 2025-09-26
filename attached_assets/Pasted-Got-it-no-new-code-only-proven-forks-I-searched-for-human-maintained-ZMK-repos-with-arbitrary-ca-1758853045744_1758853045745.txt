@@ -1,0 +1,199 @@
+Got it—no new code, only proven forks. I searched for human-maintained ZMK repos with **arbitrary cant/angle rotation** already implemented and used in the wild. Here’s the short list and the recommendation.
+
+# Best options (ranked)
+
+1. **badjeff/zmk-input-behavior-listener** — *Recommended*
+   A community module that extends ZMK’s input listener with a **`rotate-deg`** property (arbitrary angles, e.g., 45°). It’s been used with PMW3610 builds and Charybdis-style boards. The README shows real config examples, notes RAM caveats, and explains that the core ZMK “pointers + input processors” work was inspired by this and later merged (PR #2477). Even though the repo was archived after that merge, **its rotation feature (`rotate-deg`) is exactly what you want** and is already tested by users. ([GitHub][1])
+
+2. **ZMK main (post-merge of PR #2477)**
+   ZMK now has official **input processors** (scaler, transform, code-mapper, temp-layer). These cover swap/invert/scale and split routing, but the official **Transformer** docs don’t (yet) expose an arbitrary-angle rotation like `rotate-deg`; they mainly do X/Y swap and inversion. You can still use ZMK main + the listener module above if you want rotation today. ([GitHub][2])
+
+3. **Community configs referencing the same stack (PMW3610 + modules)**
+   E.g., **eigatech/zmk-config** documents using Inorichi/Badjeff modules for Charybdis builds (wireless/Nice!Nano friendly), which indicates community adoption. (It links the PMW3610 driver and the listener module pattern used in real keyboards.) ([GitHub][3])
+
+---
+
+# What I recommend right now
+
+Use **ZMK main** + **badjeff/zmk-input-behavior-listener** (for `rotate-deg`) + your current PMW3610 driver. That gives you:
+
+* Modern ZMK pointing stack & split support, and
+* A **known-good rotation control** at the listener layer (no AI code, already tested by others).
+
+---
+
+# Drop-in changes to your repo
+
+## 1) `config/west.yml` — add the listener module alongside your driver
+
+```yaml
+manifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: ihlinuxdude
+      url-base: https://github.com/ihlinuxdude
+    - name: badjeff
+      url-base: https://github.com/badjeff
+
+  projects:
+    - name: zmk
+      remote: zmkfirmware
+      revision: main
+      import: app/west.yml
+
+    # your PMW3610 driver fork
+    - name: zmk-pmw3610-driver64key
+      remote: ihlinuxdude
+      revision: main
+
+    # **rotation-capable listener**
+    - name: zmk-input-behavior-listener
+      remote: badjeff
+      revision: main
+
+  self:
+    path: config
+```
+
+Why this: the **listener** introduces `rotate-deg` and other pre-processing behaviors at the input layer (community-tested). The README shows the property and example configs with **CCW 45° alignment**. ([GitHub][1])
+
+Run:
+
+```
+west update
+```
+
+## 2) Right-half overlay with your pins + SPI mode 3 + rotation
+
+`config/boards/shields/charybdis_nano/charybdis_nano_right.overlay`
+
+```dts
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <dt-bindings/zmk/input_transform.h>
+
+/* SPI0 pins for Nice!Nano v2 */
+&pinctrl {
+    spi0_default: spi0_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 17)>;
+        };
+    };
+    spi0_sleep: spi0_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 22)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 24)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 17)>;
+            low-power-enable;
+        };
+    };
+};
+
+&spi0 {
+    status = "okay";
+    pinctrl-0 = <&spi0_default>;
+    pinctrl-1 = <&spi0_sleep>;
+    pinctrl-names = "default", "sleep";
+    cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;  /* CS=P0.20 */
+
+    pmw3610: pmw3610@0 {
+        compatible = "pixart,pmw3610";
+        reg = <0>;
+        status = "okay";
+        spi-max-frequency = <2000000>;
+        irq-gpios = <&gpio0 26 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>; /* IRQ=P0.26 */
+
+        /* SPI Mode 3 */
+        spi-cpha;
+        spi-cpol;
+
+        /* Optional orthogonal fixes if needed
+         * swap-xy;
+         * invert-x;
+         * invert-y;
+         */
+
+        /* Map to REL_X/REL_Y */
+        evt-type = <INPUT_EV_REL>;
+        x-input-code = <INPUT_REL_X>;
+        y-input-code = <INPUT_REL_Y>;
+    };
+};
+
+/* --- Rotation-capable listener from the module --- */
+ / {
+    /* Use the module’s compatible to enable rotate-deg */
+    tb_listener {
+        compatible = "zmk,input-behavior-listener";
+        status = "okay";
+        device = <&pmw3610>;
+
+        /* Make "forward" roll = straight up:
+           For a physical ~45° left cant, two common fixes work depending on your
+           mechanical orientation:
+           - CCW align by 45° => `rotate-deg = <315>;` (module’s example)
+           - Or set 45° and flip sign until the deltas look right */
+        rotate-deg = <315>; /* CCW 45° per module README */
+
+        /* If you still need transforms after rotation, you can add them.
+           NOTE from module: rotate-deg is NOT compatible with x/y invert flags. */
+        // input-processors = <&zip_xy_transform (INPUT_TRANSFORM_X_INVERT | INPUT_TRANSFORM_Y_INVERT)>;
+    };
+};
+```
+
+The **`rotate-deg`** property and the example value **`315`** (CCW alignment of 45°) come straight from the module’s README, including the note that it conflicts with `x-invert`/`y-invert` and has a RAM/USB logging caveat. ([GitHub][1])
+
+## 3) Right-half `.conf` (same as you have, plus pointing)
+
+`config/boards/shields/charybdis_nano/charybdis_nano_right.conf`
+
+```ini
+CONFIG_ZMK_POINTING=y
+CONFIG_PMW3610=y
+
+# Logging
+CONFIG_LOG=y
+CONFIG_LOG_DEFAULT_LEVEL=3
+
+# Nice!Nano bring-up helper if you see 0xFF product ID:
+CONFIG_PMW3610_INIT_POWER_UP_EXTRA_DELAY_MS=300
+```
+
+(General ZMK pointing docs + input/listener architecture: see ZMK pointing device & input processor docs. ([ZMK Firmware][4]))
+
+## 4) GitHub Actions build (unchanged conceptually)
+
+Keep your UF2 matrix for **right/left** halves—no special changes required beyond having the modules pulled by `west update`.
+
+---
+
+# Test plan (fast)
+
+1. **Build & flash right half** (ZMK main + PMW3610 driver + the listener module).
+2. **Enable info logs**: `CONFIG_LOG_DEFAULT_LEVEL=3`.
+3. **Verify deltas** in logs while rolling “forward”: you want `(X≈0, Y>0)`.
+
+   * If you see up-left (X<0, Y>0), try `rotate-deg = <45>;` or flip to `315`—the module’s example shows **315 = CCW 45°** to align movement. (It’s documented in the module README.) ([GitHub][1])
+4. **Caveats from the module**: `rotate-deg` uses floating point and can overflow stack if `CONFIG_ZMK_USB_LOGGING=y`—keep it **off** while testing rotation, or raise stack if you must use USB logging. (Also, don’t combine with `x-invert`/`y-invert`.) ([GitHub][1])
+
+---
+
+# Why this meets your “proven & vetted” bar
+
+* The **rotation feature** is implemented and documented in a public, human-written module, used by ZMK builders, with explicit examples for **45°**. The maintainer archived it only because **ZMK later merged the new pointing stack** it inspired; you can still depend on the module specifically to get **arbitrary angle rotation** today. ([GitHub][1])
+* ZMK docs show the **official listener + input processor** architecture you’re plugging into, so the module integrates cleanly with current ZMK main. ([ZMK Firmware][4])
+* Community configs for **wireless Charybdis** confirm this stack (PMW3610 + modules) is actually used in the field. ([GitHub][3])
+
+---
+
+If you want, I can also paste a minimal **`west build`** GitHub Actions job snippet wired to your current repo structure; but functionally, after adding the module to `west.yml` and setting `rotate-deg`, your UF2 builds proceed the same.
+
+Want me to prep the exact `*.overlay` and `west.yml` changes as a PR patch that you can drop into `ihlinuxdude/64key-3610-3`?
+
+[1]: https://github.com/badjeff/zmk-input-behavior-listener "GitHub - badjeff/zmk-input-behavior-listener"
+[2]: https://github.com/zmkfirmware/zmk/pull/2477 "feat(mouse): Add mouse move and scroll support by petejohanson · Pull Request #2477 · zmkfirmware/zmk · GitHub"
+[3]: https://github.com/eigatech/zmk-config "GitHub - eigatech/zmk-config"
+[4]: https://zmk.dev/docs/development/hardware-integration/pointing "Pointing Devices | ZMK Firmware"
