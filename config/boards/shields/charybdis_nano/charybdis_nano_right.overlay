@@ -1,6 +1,7 @@
  
 #include "charybdis_nano.dtsi"
 #include <zephyr/dt-bindings/pinctrl/nrf-pinctrl.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 &default_transform {
     col-offset = <6>;
@@ -53,10 +54,27 @@
         spi-cpol;                          // SPI Mode 3
         
         cs-gpios = <&gpio0 20 GPIO_ACTIVE_LOW>;
-        irq-gpios = <&gpio0 26 GPIO_ACTIVE_LOW>;
+        irq-gpios = <&gpio0 26 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
         
+        // Badjeff driver device properties
+        cpi = <1600>;
+        evt-type = <INPUT_EV_REL>;
+        x-input-code = <INPUT_REL_X>;
+        y-input-code = <INPUT_REL_Y>;
+        
+        // ZMK layer configuration
         scroll-layers = <1>;
         snipe-layers = <2>;
         // automouse-layer = <3>;
+        
+        // Power management (force sensor awake for stable operation)
+        // force-awake;
+    };
+};
+
+/ {
+    trackball_listener {
+        compatible = "zmk,input-listener";
+        device = <&trackball>;
     };
 };

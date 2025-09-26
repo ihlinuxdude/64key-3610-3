@@ -1,0 +1,50 @@
+We are switching to a new fork @ https://github.com/ihlinuxdude/zmk-pmw3610-driver64key.git, which is a maintained ZMK-compatible PMW3610 driver based on Badjeff's work. This driver is optimized for canted trackballs in ergonomic keyboards like our 64-key Dactyl/Charybdis-inspired split, and it includes features for axis swaps, inversions, and custom rotations to fix the 45° left tilt causing diagonal cursor movement.
+Project Goal
+Build custom ZMK firmware for a 64-key split keyboard with Nice!Nano v2 controllers and an integrated PMW3610 trackball on the right half. The trackball is physically canted ~45° left for ergonomics, so we need to apply a software rotation matrix to make "forward" rolls move the cursor straight up (instead of up-left). Use GitHub Actions for building UF2 files, as local tools (e.g., Replit west) are outdated.
+Current Setup
+
+Main ZMK config repo: https://github.com/ihlinuxdude/64key-3610-3 (or root-level equivalent after consolidation).
+Hardware pins: SCK=P0.22, MOSI=P0.24, MISO=P0.17, CS=P0.20, IRQ=P0.26.
+Key config files: charybdis_nano_right.overlay, charybdis_nano_right.conf, charybdis_nano.keymap.
+Logging: CONFIG_LOG_DEFAULT_LEVEL=3 for info-level logs.
+
+Steps to Integrate Badjeff Fork
+
+Update west.yml in the main ZMK repo to point to the Badjeff fork:
+textmanifest:
+  remotes:
+    - name: zmkfirmware
+      url-base: https://github.com/zmkfirmware
+    - name: ihlinuxdude
+      url-base: https://github.com/ihlinuxdude
+  projects:
+    - name: zmk
+      remote: zmkfirmware
+      revision: main
+      import: app/west.yml
+    - name: zmk-pmw3610-driver
+      remote: ihlinuxdude
+      revision: main
+  self:
+    path: config
+Run west update to pull the driver.
+Adapt config files for your 64-key layout and pins (place in config/boards/shields/charybdis_nano/):
+
+charybdis_nano_right.conf: Add Badjeff-specific options like CONFIG_PMW3610_INIT_POWER_UP_EXTRA_DELAY_MS=300 if needed for wake-up.
+charybdis_nano_right.overlay: Include swap-xy;, invert-x;, invert-y; for orthogonal fixes, and ensure SPI Mode 3 (spi-cpha;, spi-cpol;).
+
+
+Add 45° rotation matrix if not natively supported:
+
+Edit pmw3610.c in the driver (after delta reads):
+textint16_t temp_x = delta_x;
+int16_t cos45 = 7071;  // cos(45°) * 10000
+int16_t sin45 = 7071;  // sin(45°) * 10000
+delta_x = (temp_x * cos45 - delta_y * sin45) / 10000;
+delta_y = (temp_x * sin45 + delta_y * cos45) / 10000;
+
+
+
+Commit, push, build via GitHub Actions, flash right half, test trackball, review logs for deltas.
+
+Assist in implementing, debugging, or testing this switch to fix the 45° diagonal tracking.
