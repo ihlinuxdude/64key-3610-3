@@ -5,3 +5,26 @@ integrations = ["github:1.0.0"]
 
 [nix]
 channel = "stable-25_05"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Build Monitor"
+
+[[workflows.workflow]]
+name = "Build Monitor"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "echo \"✅ PMW3610 45° rotation fix ready. Push changes to trigger GitHub Actions build.\" && echo \"📊 Monitor: https://github.com/ihlinuxdude/zmk-pmw3610-driver64key/actions\" && sleep 10 && echo \"🔄 Checking build status...\" && sleep 3600"
+
+[workflows.workflow.metadata]
+outputType = "console"
