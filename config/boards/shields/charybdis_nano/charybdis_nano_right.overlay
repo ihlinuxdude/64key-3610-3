@@ -62,11 +62,8 @@
         x-input-code = <INPUT_REL_X>;
         y-input-code = <INPUT_REL_Y>;
         
-        // Axis transformation for 45° canted trackball
-        // This fork supports these device tree properties:
-        swap-xy;         // Swap X and Y axes (90° rotation)
-        invert-x;        // Invert X axis direction  
-        // invert-y;        // Uncomment if needed for fine-tuning
+        // Basic device properties (no axis transforms - using rotation listener instead)
+        // Note: Don't use swap-xy/invert-x with rotate-deg (they conflict per badjeff docs)
         
         // ZMK layer configuration
         scroll-layers = <1>;
@@ -79,8 +76,16 @@
 };
 
 / {
-    trackball_listener {
-        compatible = "zmk,input-listener";
+    tb_listener {
+        compatible = "zmk,input-behavior-listener";
+        status = "okay";
         device = <&trackball>;
+        
+        // Proven 45° cant fix from badjeff/zmk-input-behavior-listener
+        // CCW 45° rotation (315°) to make forward rolls go straight up
+        rotate-deg = <315>;
+        
+        // Note from module docs: rotate-deg conflicts with x/y invert flags
+        // Also avoid CONFIG_ZMK_USB_LOGGING=y (can overflow stack)
     };
 };
